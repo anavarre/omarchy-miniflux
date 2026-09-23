@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "id": "anavarre.miniflux",
+  "name": "Miniflux",
+  "version": "1.0.0",
+  "author": "Aurelien Navarre",
+  "license": "MIT",
+  "description": "Read the latest unread items from a Miniflux instance and mark them read without leaving the bar.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Miniflux",
+    "description": "Shows the latest unread Miniflux entries, opens them in the browser and marks them read.",
+    "category": "Productivity",
+    "aliases": [
+      "miniflux",
+      "rss",
+      "feeds"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "entryLimit": 20,
+      "unreadOnly": true
+    },
+    "schema": [
+      {
+        "key": "entryLimit",
+        "type": "integer",
+        "label": "Entries to show",
+        "min": 5,
+        "max": 100,
+        "step": 5,
+        "defaultValue": 20
+      },
+      {
+        "key": "unreadOnly",
+        "type": "boolean",
+        "label": "Unread entries only",
+        "defaultValue": true,
+        "description": "Off also lists entries you have already read."
+      }
+    ]
+  }
+}
