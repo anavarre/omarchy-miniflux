@@ -17,6 +17,12 @@ var store = '"${MINIFLUX_PLUGIN_DIR:-$HOME/.config/omarchy/miniflux}"'
 // caller can tell 200 from 401 without a second request.
 var statusLine = 'write-out = "\\\\n%%{http_code}"\\n'
 
+// curl's -K parser reads `name = "value"` with backslash escapes, so a secret
+// carrying a quote or a backslash has to be escaped or it truncates the line.
+// Values are read one per line, so no newline can reach this to start a new
+// directive; this is about passwords that are merely awkward, not hostile.
+var escFn = 'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'; }'
+
 var prelude = [
   'set -u',
   'store=' + store,
@@ -35,9 +41,10 @@ var prelude = [
   '[ -n "$server" ] || exit 10',
   '[ -n "$token" ] || [ -n "$username" ] || exit 11',
   '[ -n "$token" ] || [ -n "$password" ] || exit 12',
+  escFn,
   'auth() {',
-  '  if [ -n "$token" ]; then printf \'header = "X-Auth-Token: %s"\\n\' "$token"',
-  '  else printf \'user = "%s:%s"\\n\' "$username" "$password"; fi',
+  '  if [ -n "$token" ]; then printf \'header = "X-Auth-Token: %s"\\n\' "$(esc "$token")"',
+  '  else printf \'user = "%s:%s"\\n\' "$(esc "$username")" "$(esc "$password")"; fi',
   '}',
   'api() {',
   '  path="$1"; shift',
@@ -109,7 +116,7 @@ function configCommand() {
     'username="${MINIFLUX_USERNAME:-}"; [ -n "$username" ] || username=$(saved username)',
     'has=false',
     'if [ -n "${MINIFLUX_API_KEY:-}" ] || [ -s "$store/token" ] || [ -s "$store/password" ]; then has=true; fi',
-    'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'; }',
+    escFn,
     'printf \'{"server":"%s","username":"%s","hasSecret":%s}\\n\' "$(esc "$server")" "$(esc "$username")" "$has"'
   ].join("\n")]
 }
@@ -131,7 +138,8 @@ function saveCommand() {
     '[ -n "$server" ] || exit 10',
     '[ -n "$username" ] || exit 11',
     '[ -n "$password" ] || exit 12',
-    'auth() { printf \'user = "%s:%s"\\nsilent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\' "$username" "$password"; }',
+    escFn,
+    'auth() { printf \'user = "%s:%s"\\nsilent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\' "$(esc "$username")" "$(esc "$password")"; }',
     'me=$(auth | curl -K - "$server/v1/me") || exit 20',
     'code=$(printf \'%s\' "$me" | tail -n1)',
     '[ "$code" = "200" ] || { printf \'%s\\n\' "$code" >&2; exit 21; }',
@@ -155,6 +163,7 @@ function saveCommand() {
 // not ours to remove.
 function forgetCommand() {
   return ["bash", "-c", [
+    'set -u',
     'store=' + store,
     'rm -f "$store/config" "$store/token" "$store/password"'
   ].join("\n")]

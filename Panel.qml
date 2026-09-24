@@ -296,7 +296,10 @@ Panel {
   function openEntry(index) {
     if (index < 0 || index >= root.entries.length) return
     var entry = root.entries[index]
-    if (entry.url === "") return
+    // The url is feed content, so it is whatever the item's author wrote.
+    // openUrlExternally dispatches on scheme to any registered handler, so
+    // only the two schemes an article can legitimately live at get through.
+    if (!/^https?:\/\//i.test(entry.url)) return
     Qt.openUrlExternally(entry.url)
     root.close()
   }
@@ -630,6 +633,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.authHint !== "" && root.authError === ""
+            textFormat: Text.PlainText
             text: root.authHint
             color: root.dim
             font.family: root.fontFamily
@@ -640,6 +644,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.authError !== ""
+            textFormat: Text.PlainText
             text: root.authError
             color: root.urgent
             font.family: root.fontFamily
@@ -761,6 +766,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.saveNotice !== "" && root.errorText === ""
+            textFormat: Text.PlainText
             text: root.saveNotice
             color: root.dim
             font.family: root.fontFamily
@@ -771,6 +777,7 @@ Panel {
           Text {
             width: parent.width
             visible: root.errorText !== ""
+            textFormat: Text.PlainText
             text: root.errorText
             color: root.urgent
             font.family: root.fontFamily
@@ -852,6 +859,9 @@ Panel {
 
                       Text {
                         width: parent.width
+                        // Feed text, so never AutoText: rich text would let a
+                        // title pull a remote <img> when the panel opens.
+                        textFormat: Text.PlainText
                         text: Model.decodeTitle(modelData.title)
                         color: root.foreground
                         font.family: root.fontFamily
@@ -864,6 +874,7 @@ Panel {
 
                       Text {
                         width: parent.width
+                        textFormat: Text.PlainText
                         text: [modelData.feed, Model.formatAge(modelData.published)]
                           .filter(function(v) { return v !== "" }).join(" · ")
                         color: root.dim
