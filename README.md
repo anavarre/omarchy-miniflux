@@ -4,6 +4,8 @@ The latest unread entries from your [Miniflux](https://miniflux.app) instance, i
 Omarchy bar. Click a title to read it in your browser, mark one entry read, or mark
 everything the panel is showing read.
 
+![Miniflux panel in the Omarchy bar](preview.png)
+
 ## Install
 
 ```sh
@@ -77,3 +79,7 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
 omarchy plugin disable anavarre.miniflux
 rm -rf ~/.config/omarchy/plugins/anavarre.miniflux ~/.config/omarchy/miniflux
 ```
+
+## License
+
+[MIT](LICENSE).
