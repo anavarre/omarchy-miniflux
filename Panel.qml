@@ -15,8 +15,42 @@ Panel {
 
   // Pushed in by the bar widget, which is the only side the shell injects
   // user settings into.
-  property int entryLimit: 20
+  property int entryLimit: 10
+  // 1 up to the API's own ceiling, so the list can be as short or as long as
+  // the user wants it.
+  readonly property int entryLimitMin: 1
+  readonly property int entryLimitMax: 100
   property bool unreadOnly: true
+  // Minutes between automatic refreshes. Injected from the stored setting and
+  // written back by the Settings section; always one of the allowed steps.
+  property int refreshMinutes: 30
+  // 30 minutes up to a day, so the interval can never hammer the instance.
+  readonly property var refreshChoices: [30, 60, 120, 180, 360, 720, 1440]
+  readonly property int refreshMin: refreshChoices[0]
+  readonly property int refreshMax: refreshChoices[refreshChoices.length - 1]
+
+  // Text size is offered as named sizes rather than pixel values — the user
+  // picks how big the panel reads, and every font size in it is scaled by the
+  // matching factor.
+  // Whether a refresh that brings in unseen entries lights up the bar icon.
+  property bool newEntryIndicator: true
+
+  property string textSize: "medium"
+  readonly property var textSizes: [
+    { value: "small", label: "Small", scale: 0.85 },
+    { value: "medium", label: "Medium", scale: 1.0 },
+    { value: "large", label: "Large", scale: 1.2 },
+    { value: "xlarge", label: "Extra large", scale: 1.45 }
+  ]
+  readonly property real textScale: {
+    for (var i = 0; i < root.textSizes.length; i++)
+      if (root.textSizes[i].value === root.textSize) return root.textSizes[i].scale
+    return 1.0
+  }
+
+  // Every font size in this panel goes through here, so one setting moves all
+  // of them together.
+  function fs(size) { return Math.round(size * root.textScale) }
 
   // "unknown" until the first check, then "checking" / "ok" / "error".
   // Everything else is gated on "ok", so a credential problem is reported
@@ -38,9 +72,35 @@ Panel {
   property bool hasSecret: false
   readonly property bool showSignIn: root.configuring || root.authState === "unknown"
     || (!root.authenticated && (root.authError !== "" || root.authHint !== ""))
+  readonly property bool showSettings: root.settingsOpen && !root.showSignIn
+
+  // The Settings section, reached from the footer. It replaces the list while
+  // it is up, the way the sign-in form does.
+  property bool settingsOpen: false
+
+  // The shortcuts cheat sheet, opened with "?" or the footer's question mark.
+  // It floats over whatever section is up rather than replacing it, so you
+  // can read a binding without losing your place in the list.
+  property bool shortcutsOpen: false
+  readonly property var shortcuts: [
+    { keys: "j / k", what: "Move the selection" },
+    { keys: "Enter", what: "Open the selected entry" },
+    { keys: "x", what: "Mark the selected entry read" },
+    { keys: "a", what: "Mark the listed entries read" },
+    { keys: "r", what: "Refresh now" },
+    { keys: "s", what: "Save the selected entry" },
+    { keys: ",", what: "Settings" },
+    { keys: "c", what: "Account / sign in" },
+    { keys: "Tab", what: "Switch to the next panel" },
+    { keys: "?", what: "Show or hide this list" },
+    { keys: "Esc", what: "Close" }
+  ]
 
   property bool loading: false
   property string errorText: ""
+  // Transient confirmation for the save shortcut, shown under the header.
+  property string saveNotice: ""
+  property bool saveEntryBusy: false
   property var entries: []
   property int total: 0
   property int selected: -1
@@ -51,12 +111,51 @@ Panel {
   // list back by refetching.
   property var pending: []
 
+  // Set when a background refresh turns up entry ids that were not in the
+  // previous list. The bar widget reads it to paint its dot; opening the panel
+  // is what clears it, since by then you have seen them.
+  property bool hasNewEntries: false
+  // Ids from the last fetch, rebuilt each time so the map cannot grow without
+  // bound. Null until the first fetch lands — that one only sets the baseline,
+  // so signing in does not immediately claim everything is new.
+  property var seenIds: null
+
+  // Folds a freshly fetched list into the baseline and reports whether any of
+  // it was unseen.
+  function noteEntries(list) {
+    var seen = {}
+    var fresh = false
+    for (var i = 0; i < list.length; i++) {
+      seen[list[i].id] = true
+      if (root.seenIds !== null && !root.seenIds[list[i].id]) fresh = true
+    }
+    root.seenIds = seen
+    if (fresh && !root.opened) root.hasNewEntries = true
+  }
+
+  function clearNewEntries() {
+    root.hasNewEntries = false
+    var seen = {}
+    for (var i = 0; i < root.entries.length; i++) seen[root.entries[i].id] = true
+    root.seenIds = seen
+  }
+
+  function setNewEntryIndicator(on) {
+    if (on === root.newEntryIndicator) return
+    root.newEntryIndicator = on
+    if (!on) root.hasNewEntries = false
+    if (root.hostWidget && typeof root.hostWidget.saveNewEntryIndicator === "function")
+      root.hostWidget.saveNewEntryIndicator(on)
+  }
+
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color dim: Qt.darker(foreground, 1.5)
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  readonly property real cardWidth: panel.fittedContentWidth(Style.space(460))
+  // The card grows with the text, so a larger size means fewer wrapped titles
+  // rather than the same column set in bigger type.
+  readonly property real cardWidth: panel.fittedContentWidth(Style.space(Math.round(460 * root.textScale)))
   // The list gets whatever the screen leaves once the header, the footer and
   // the card's own padding are taken out.
   readonly property real maxListHeight: Math.max(Style.space(120),
@@ -77,6 +176,7 @@ Panel {
   }
 
   function openSignIn() {
+    root.settingsOpen = false
     root.configuring = true
     root.authError = ""
     root.authHint = ""
@@ -107,6 +207,75 @@ Panel {
     forgetProcess.running = true
   }
 
+  // Snaps whatever comes in to the nearest allowed choice, so a stored value
+  // from an older version still lands on something valid.
+  function setRefreshMinutes(minutes) {
+    var wanted = Number(minutes)
+    if (!isFinite(wanted)) wanted = root.refreshMin
+    var n = root.refreshChoices[0]
+    for (var i = 1; i < root.refreshChoices.length; i++) {
+      if (Math.abs(root.refreshChoices[i] - wanted) < Math.abs(n - wanted))
+        n = root.refreshChoices[i]
+    }
+    if (n === root.refreshMinutes) return
+    root.refreshMinutes = n
+    if (root.hostWidget && typeof root.hostWidget.saveRefreshMinutes === "function")
+      root.hostWidget.saveRefreshMinutes(n)
+  }
+
+  // Written back through the widget like the other panel-side settings, and
+  // the list is refetched so the new count is visible straight away.
+  function setEntryLimit(value) {
+    var n = Math.round(Number(value))
+    if (!isFinite(n)) return
+    n = Math.max(root.entryLimitMin, Math.min(root.entryLimitMax, n))
+    if (n === root.entryLimit) return
+    root.entryLimit = n
+    if (root.hostWidget && typeof root.hostWidget.saveEntryLimit === "function")
+      root.hostWidget.saveEntryLimit(n)
+    if (root.authenticated) root.refresh()
+  }
+
+  // One at a time up to ten, then in tens — a short list is tuned precisely,
+  // a long one does not need forty clicks.
+  function stepEntryLimit(delta) {
+    var step = (delta > 0 ? root.entryLimit >= 10 : root.entryLimit > 10) ? 10 : 1
+    var next = root.entryLimit + delta * step
+    if (step === 10) next = Math.round(next / 10) * 10
+    root.setEntryLimit(next)
+  }
+
+  function stepRefreshMinutes(delta) {
+    var i = root.refreshChoices.indexOf(root.refreshMinutes)
+    if (i < 0) { root.setRefreshMinutes(root.refreshMinutes); return }
+    i = Math.max(0, Math.min(root.refreshChoices.length - 1, i + delta))
+    root.setRefreshMinutes(root.refreshChoices[i])
+  }
+
+  function setTextSize(value) {
+    var next = String(value || "")
+    var known = false
+    for (var i = 0; i < root.textSizes.length; i++)
+      if (root.textSizes[i].value === next) known = true
+    if (!known || next === root.textSize) return
+    root.textSize = next
+    if (root.hostWidget && typeof root.hostWidget.saveTextSize === "function")
+      root.hostWidget.saveTextSize(next)
+  }
+
+  readonly property int textSizeIndex: {
+    for (var i = 0; i < root.textSizes.length; i++)
+      if (root.textSizes[i].value === root.textSize) return i
+    return 1
+  }
+
+  readonly property string textSizeLabel: root.textSizes[root.textSizeIndex].label
+
+  function stepTextSize(delta) {
+    var i = Math.max(0, Math.min(root.textSizes.length - 1, root.textSizeIndex + delta))
+    root.setTextSize(root.textSizes[i].value)
+  }
+
   function checkAuth() {
     if (root.authState === "checking") return
     root.authState = "checking"
@@ -121,6 +290,7 @@ Panel {
     root.errorText = ""
     entriesProcess.command = Model.entriesCommand(root.entryLimit, root.unreadOnly)
     entriesProcess.running = true
+    autoRefresh.restart()
   }
 
   function openEntry(index) {
@@ -153,10 +323,38 @@ Panel {
     root.markRead([root.entries[root.selected].id])
   }
 
+  // Only what is loaded in the panel right now: the batch is built from the
+  // rows on screen, never from the instance's wider unread count, so entries
+  // beyond the list are left alone.
   function markAllRead() {
     var ids = []
-    for (var i = 0; i < root.entries.length; i++) ids.push(root.entries[i].id)
+    for (var i = 0; i < root.entries.length; i++)
+      if (root.entries[i].unread) ids.push(root.entries[i].id)
     root.markRead(ids)
+  }
+
+  readonly property int listedUnread: {
+    var n = 0
+    for (var i = 0; i < root.entries.length; i++) if (root.entries[i].unread) n++
+    return n
+  }
+
+  // Hands the selected entry to the account's save integration. The entry
+  // stays in the list -- saving is not reading -- so the only feedback is the
+  // note under the header, which clears itself after a few seconds.
+  function saveSelected() {
+    if (!root.authenticated) return
+    if (root.selected < 0 || root.selected >= root.entries.length) return
+    if (root.saveEntryBusy) return
+    root.saveEntryBusy = true
+    root.saveNotice = ""
+    saveEntryProcess.command = Model.saveEntryCommand(root.entries[root.selected].id)
+    saveEntryProcess.running = true
+  }
+
+  function noteSaved(message) {
+    root.saveNotice = message
+    saveNoticeTimer.restart()
   }
 
   function moveSelection(delta) {
@@ -172,10 +370,45 @@ Panel {
   // every later open refetches, because a feed list read an hour ago is stale.
   onOpenedChanged: {
     if (!opened) return
+    root.clearNewEntries()
     root.selected = -1
+    root.settingsOpen = false
     if (root.authenticated) root.refresh()
     else if (!root.configuring) root.checkAuth()
     if (root.showSignIn) Qt.callLater(function() { serverField.forceActiveFocus() })
+  }
+
+  // Keeps the list current in the background, so an open shows fresh entries
+  // rather than starting a fetch you wait on. A manual refresh restarts it.
+  Timer {
+    id: autoRefresh
+    interval: Math.max(root.refreshMin, root.refreshMinutes) * 60000
+    repeat: true
+    running: root.authenticated
+    onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: saveNoticeTimer
+    interval: 4000
+    onTriggered: root.saveNotice = ""
+  }
+
+  Process {
+    id: saveEntryProcess
+    running: false
+    command: []
+    stdout: StdioCollector { id: saveEntryStdout; waitForEnd: true }
+    stderr: StdioCollector { id: saveEntryStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.saveEntryBusy = false
+      var response = Model.splitResponse(saveEntryStdout.text)
+      if (exitCode === 0 && (response.status === 202 || response.status === 200 || response.status === 204)) {
+        root.noteSaved("Saved.")
+        return
+      }
+      root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
+    }
   }
 
   Process {
@@ -232,6 +465,8 @@ Panel {
     onExited: {
       root.hasSecret = false
       root.entries = []
+      root.seenIds = null
+      root.hasNewEntries = false
       root.total = 0
       root.account = ""
       root.configuring = true
@@ -300,6 +535,7 @@ Panel {
       }
       try {
         root.entries = Model.parseEntries(response.body)
+        root.noteEntries(root.entries)
         root.total = Model.totalEntries(response.body)
         root.errorText = ""
         root.selected = -1
@@ -319,7 +555,13 @@ Panel {
       var response = Model.splitResponse(markStdout.text)
       var ok = exitCode === 0 && (response.status === 204 || response.status === 200)
       root.pending = []
-      if (ok) return
+      if (ok) {
+        // Marking the list read can empty it while the instance still holds
+        // unread entries the limit kept out. Pulling the next batch straight
+        // away shows them without waiting for a manual "r".
+        if (root.entries.length === 0 && root.total > 0) root.refresh()
+        return
+      }
       // The rows were taken out on the assumption this would work; refetching
       // is the honest way to put back whatever is actually still unread.
       root.errorText = Model.errorMessage(markStderr.text, exitCode, response.status)
@@ -335,7 +577,11 @@ Panel {
     open: root.opened
     focusTarget: root.showSignIn ? serverField : keys
     contentWidth: root.cardWidth
-    contentHeight: panel.fittedContentHeight(content.implicitHeight)
+    // The cheat sheet floats over the content, so the panel still has to be
+    // tall enough to hold it -- otherwise a short list leaves it overflowing
+    // past the background.
+    contentHeight: panel.fittedContentHeight(Math.max(content.implicitHeight,
+      root.shortcutsOpen ? shortcutsSheet.implicitHeight : 0))
 
     PanelKeyCatcher {
       id: keys
@@ -345,13 +591,20 @@ Panel {
       blocked: root.showSignIn
       onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveSelection(dy) }
       onActivateRequested: root.openEntry(root.selected)
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.shortcutsOpen) root.shortcutsOpen = false
+        else if (root.settingsOpen) root.settingsOpen = false
+        else root.close()
+      }
       onDeleteRequested: root.markSelectedRead()
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (text === "r") root.refresh()
         else if (text === "a") root.markAllRead()
         else if (text === "c") root.openSignIn()
+        else if (text === "s") root.saveSelected()
+        else if (text === ",") root.settingsOpen = !root.settingsOpen
+        else if (text === "?") root.shortcutsOpen = !root.shortcutsOpen
       }
 
       Column {
@@ -370,7 +623,7 @@ Panel {
             text: "Sign in to Miniflux"
             color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: Style.font.subtitle
+            font.pixelSize: root.fs(Style.font.subtitle)
             font.bold: true
           }
 
@@ -380,7 +633,7 @@ Panel {
             text: root.authHint
             color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: root.fs(Style.font.bodySmall)
             wrapMode: Text.WordWrap
           }
 
@@ -390,7 +643,7 @@ Panel {
             text: root.authError
             color: root.urgent
             font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: root.fs(Style.font.bodySmall)
             wrapMode: Text.WordWrap
           }
 
@@ -398,6 +651,8 @@ Panel {
             id: serverField
             width: parent.width
             foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.body)
             placeholderText: "miniflux.example.org"
             onAccepted: userField.forceActiveFocus()
             Keys.onEscapePressed: root.cancelSignIn()
@@ -407,6 +662,8 @@ Panel {
             id: userField
             width: parent.width
             foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.body)
             placeholderText: "Username"
             onAccepted: passField.forceActiveFocus()
             Keys.onEscapePressed: root.cancelSignIn()
@@ -416,6 +673,8 @@ Panel {
             id: passField
             width: parent.width
             foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.body)
             password: true
             placeholderText: "Password"
             onAccepted: root.saveSignIn()
@@ -428,7 +687,7 @@ Panel {
                 + "Instances older than 2.2.9 keep the password in ~/.config/omarchy/miniflux, readable only by you."
             color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+            font.pixelSize: root.fs(Style.font.caption)
             wrapMode: Text.WordWrap
           }
 
@@ -439,6 +698,7 @@ Panel {
               text: root.saving ? "Signing in…" : "Sign in"
               enabled: !root.saving
               foreground: root.foreground
+              fontSize: root.fs(Style.font.body)
               bordered: true
               onClicked: root.saveSignIn()
             }
@@ -447,6 +707,7 @@ Panel {
               visible: root.authenticated
               text: "Cancel"
               foreground: root.foreground
+              fontSize: root.fs(Style.font.body)
               onClicked: root.cancelSignIn()
             }
 
@@ -454,6 +715,7 @@ Panel {
               visible: root.hasSecret
               text: "Forget credentials"
               foreground: root.foreground
+              fontSize: root.fs(Style.font.body)
               onClicked: root.forgetSignIn()
             }
           }
@@ -463,7 +725,7 @@ Panel {
         Column {
           width: parent.width
           spacing: Style.space(8)
-          visible: !root.showSignIn
+          visible: !root.showSignIn && !root.showSettings
 
           Item {
             width: parent.width
@@ -476,7 +738,7 @@ Panel {
               text: root.unreadOnly ? "Unread" : "Latest"
               color: root.foreground
               font.family: root.fontFamily
-              font.pixelSize: Style.font.subtitle
+              font.pixelSize: root.fs(Style.font.subtitle)
               font.bold: true
             }
 
@@ -486,16 +748,24 @@ Panel {
               anchors.verticalCenter: parent.verticalCenter
               text: {
                 if (root.loading) return "Fetching…"
-                var parts = []
-                if (root.total > root.entries.length) parts.push(root.entries.length + " of " + root.total)
-                if (root.account !== "") parts.push(root.account)
-                return parts.join(" · ")
+                if (root.entries.length === 0) return ""
+                return root.entries.length + " of " + Math.max(root.total, root.entries.length)
               }
               color: root.dim
               font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
+              font.pixelSize: root.fs(Style.font.caption)
               elide: Text.ElideRight
             }
+          }
+
+          Text {
+            width: parent.width
+            visible: root.saveNotice !== "" && root.errorText === ""
+            text: root.saveNotice
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            wrapMode: Text.WordWrap
           }
 
           Text {
@@ -504,7 +774,7 @@ Panel {
             text: root.errorText
             color: root.urgent
             font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
+            font.pixelSize: root.fs(Style.font.bodySmall)
             wrapMode: Text.WordWrap
           }
 
@@ -514,7 +784,7 @@ Panel {
             text: root.unreadOnly ? "Nothing unread." : "No entries."
             color: root.dim
             font.family: root.fontFamily
-            font.pixelSize: Style.font.body
+            font.pixelSize: root.fs(Style.font.body)
           }
 
           // Takes exactly the height its rows need, and only scrolls — keeping
@@ -585,7 +855,7 @@ Panel {
                         text: Model.decodeTitle(modelData.title)
                         color: root.foreground
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.body
+                        font.pixelSize: root.fs(Style.font.body)
                         font.underline: titleHover.hovered
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
@@ -598,7 +868,7 @@ Panel {
                           .filter(function(v) { return v !== "" }).join(" · ")
                         color: root.dim
                         font.family: root.fontFamily
-                        font.pixelSize: Style.font.caption
+                        font.pixelSize: root.fs(Style.font.caption)
                         elide: Text.ElideRight
                       }
                     }
@@ -611,7 +881,7 @@ Panel {
                       tooltipText: "Mark as read"
                       foreground: root.dim
                       hoverColor: root.foreground
-                      fontSize: Style.font.bodySmall
+                      fontSize: root.fs(Style.font.bodySmall)
                       onClicked: root.markRead([modelData.id])
                     }
                   }
@@ -620,40 +890,410 @@ Panel {
             }
           }
 
+          Item {
+            width: parent.width
+            height: Math.max(footerActions.implicitHeight, helpButton.implicitHeight)
+
           Row {
+            id: footerActions
+            anchors.left: parent.left
+            anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(6)
 
             Button {
               text: "Refresh"
               enabled: !root.loading
               foreground: root.foreground
-              fontSize: Style.font.bodySmall
+              fontSize: root.fs(Style.font.bodySmall)
               onClicked: root.refresh()
             }
 
             Button {
-              text: "Mark all read"
-              enabled: root.entries.length > 0
+              text: "Mark as read"
+              enabled: root.listedUnread > 0
               foreground: root.foreground
-              fontSize: Style.font.bodySmall
+              fontSize: root.fs(Style.font.bodySmall)
               onClicked: root.markAllRead()
+            }
+
+            Button {
+              text: "Settings"
+              foreground: root.dim
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: root.settingsOpen = true
             }
 
             Button {
               text: "Account"
               foreground: root.dim
-              fontSize: Style.font.bodySmall
+              fontSize: root.fs(Style.font.bodySmall)
               onClicked: root.openSignIn()
             }
           }
 
+            PanelActionButton {
+              id: helpButton
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              // nf-fa-question_circle (U+F059)
+              iconText: ""
+              tooltipText: "Keyboard shortcuts (?)"
+              foreground: root.shortcutsOpen ? root.foreground : root.dim
+              hoverColor: root.foreground
+              fontSize: root.fs(Style.font.body)
+              onClicked: root.shortcutsOpen = !root.shortcutsOpen
+            }
+          }
+        }
+
+        // ------------------------------------------------------- settings
+        Column {
+          id: settingsColumn
+          width: parent.width
+          spacing: Style.space(8)
+          visible: root.showSettings
+
+          // Every minus/plus row shares one value width — the widest value
+          // across the rows — so the buttons line up in a single column
+          // whatever the text size, with each value centred between them.
+          readonly property real stepperValueWidth: Math.max(
+            Style.space(Math.round(70 * root.textScale)),
+            countValue.contentWidth,
+            intervalValue.contentWidth,
+            textSizeValue.contentWidth)
+
+          // The minus/plus buttons set the height of every stepper row
+          // (PanelActionButton.size), so the switch matches it and the
+          // on/off row sits at exactly the same height as the others.
+          readonly property real controlHeight: Math.max(
+            Style.space(22),
+            root.fs(Style.font.bodySmall) + Style.spacing.sm * 2)
+
           Text {
             width: parent.width
-            text: "j/k move · Enter opens · x marks read · a marks all · r refreshes"
-            color: root.dim
+            text: "Settings"
+            color: root.foreground
             font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
+            font.pixelSize: root.fs(Style.font.subtitle)
+            font.bold: true
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(countCaption.implicitHeight, countControls.implicitHeight)
+
+            Text {
+              id: countCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              // Yields to the stepper rather than sliding under it.
+              width: parent.width - countControls.width - Style.space(8)
+              text: "Entries to show"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            Row {
+              id: countControls
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-minus (U+F068)
+                iconText: "\uf068"
+                tooltipText: "Fewer"
+                enabled: root.entryLimit > root.entryLimitMin
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepEntryLimit(-1)
+              }
+
+              Text {
+                id: countValue
+                anchors.verticalCenter: parent.verticalCenter
+                width: settingsColumn.stepperValueWidth
+                horizontalAlignment: Text.AlignHCenter
+                text: root.entryLimit === 1 ? "1 entry" : root.entryLimit + " entries"
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.body)
+              }
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-plus (U+F067)
+                iconText: "\uf067"
+                tooltipText: "More"
+                enabled: root.entryLimit < root.entryLimitMax
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepEntryLimit(1)
+              }
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(intervalLabel.implicitHeight, intervalControls.implicitHeight)
+
+            Text {
+              id: intervalLabel
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              // Yields to the stepper rather than sliding under it.
+              width: parent.width - intervalControls.width - Style.space(8)
+              text: "Refresh every"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            Row {
+              id: intervalControls
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-minus (U+F068)
+                iconText: "\uf068"
+                tooltipText: "Less often"
+                enabled: root.refreshMinutes > root.refreshMin
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepRefreshMinutes(-1)
+              }
+
+              Text {
+                id: intervalValue
+                anchors.verticalCenter: parent.verticalCenter
+                width: settingsColumn.stepperValueWidth
+                horizontalAlignment: Text.AlignHCenter
+                text: root.refreshMinutes < 60
+                  ? root.refreshMinutes + " min"
+                  : (root.refreshMinutes / 60) + (root.refreshMinutes === 60 ? " hour" : " hours")
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.body)
+              }
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-plus (U+F067)
+                iconText: "\uf067"
+                tooltipText: "More often"
+                enabled: root.refreshMinutes < root.refreshMax
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepRefreshMinutes(1)
+              }
+            }
+          }
+
+          // Same minus/plus control as the refresh interval, and the panel
+          // redraws at the chosen size as soon as it is picked.
+          Item {
+            width: parent.width
+            height: Math.max(textSizeCaption.implicitHeight, textSizeControls.implicitHeight)
+
+            Text {
+              id: textSizeCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              // Yields to the stepper rather than sliding under it.
+              width: parent.width - textSizeControls.width - Style.space(8)
+              text: "Text size"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            Row {
+              id: textSizeControls
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(8)
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-minus (U+F068)
+                iconText: "\uf068"
+                tooltipText: "Smaller"
+                enabled: root.textSizeIndex > 0
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepTextSize(-1)
+              }
+
+              Text {
+                id: textSizeValue
+                anchors.verticalCenter: parent.verticalCenter
+                width: settingsColumn.stepperValueWidth
+                horizontalAlignment: Text.AlignHCenter
+                text: root.textSizeLabel
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.body)
+              }
+
+              PanelActionButton {
+                anchors.verticalCenter: parent.verticalCenter
+                // nf-fa-plus (U+F067)
+                iconText: "\uf067"
+                tooltipText: "Larger"
+                enabled: root.textSizeIndex < root.textSizes.length - 1
+                foreground: root.foreground
+                hoverColor: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.stepTextSize(1)
+              }
+            }
+          }
+
+          // The one on/off setting in the panel, so it reads as a switch
+          // rather than as another minus/plus pair.
+          Item {
+            width: parent.width
+            height: Math.max(indicatorCaption.implicitHeight, settingsColumn.controlHeight)
+
+            Text {
+              id: indicatorCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - indicatorSwitch.width - Style.space(8)
+              text: "Dot on the bar for new entries"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: indicatorSwitch
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.newEntryIndicator
+              // Same height as the stepper buttons; no cursor ring padding so
+              // the row does not grow taller than its neighbours.
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              onToggled: root.setNewEntryIndicator(!root.newEntryIndicator)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: doneButton.implicitHeight
+
+            Button {
+              id: doneButton
+              anchors.right: parent.right
+              text: "Done"
+              foreground: root.foreground
+              bordered: true
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: root.settingsOpen = false
+            }
+          }
+        }
+      }
+
+      // ------------------------------------------------ shortcuts cheat sheet
+      // Sits over the content instead of in the layout, so opening it never
+      // resizes the panel or scrolls the list out from under you.
+      Rectangle {
+        id: shortcutsSheet
+        anchors.fill: parent
+        visible: root.shortcutsOpen
+        implicitHeight: shortcutsColumn.implicitHeight
+        color: Color.popups.background
+        radius: Style.space(4)
+
+        // Swallows clicks and pointer moves so the list underneath can't be
+        // hovered or opened through the sheet.
+        HoverHandler {}
+        TapHandler { onTapped: root.shortcutsOpen = false }
+
+        Column {
+          id: shortcutsColumn
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          spacing: Style.space(6)
+
+          Item {
+            width: parent.width
+            height: Math.max(shortcutsHeading.implicitHeight, shortcutsClose.implicitHeight)
+
+            Text {
+              id: shortcutsHeading
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Keyboard shortcuts"
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.subtitle)
+              font.bold: true
+            }
+
+            PanelActionButton {
+              id: shortcutsClose
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              // nf-fa-times (U+F00D)
+              iconText: ""
+              tooltipText: "Close"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: root.shortcutsOpen = false
+            }
+          }
+
+          Repeater {
+            model: root.shortcuts
+
+            Item {
+              required property var modelData
+
+              width: parent.width
+              height: Math.max(keyLabel.implicitHeight, whatLabel.implicitHeight)
+
+              Text {
+                id: keyLabel
+                anchors.left: parent.left
+                width: Style.space(Math.round(76 * root.textScale))
+                text: modelData.keys
+                color: root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.bodySmall)
+                font.bold: true
+              }
+
+              Text {
+                id: whatLabel
+                anchors.left: keyLabel.right
+                anchors.right: parent.right
+                text: modelData.what
+                color: root.dim
+                font.family: root.fontFamily
+                font.pixelSize: root.fs(Style.font.bodySmall)
+                elide: Text.ElideRight
+              }
+            }
           }
         }
       }

@@ -34,23 +34,41 @@ them yourself: `MINIFLUX_SERVER`, `MINIFLUX_API_KEY`, or `MINIFLUX_USERNAME` plu
 
 Each row shows the entry title, with its feed and age underneath. Clicking the title
 opens it in your default browser; the check button on the right marks that one entry
-read; "Mark all read" marks every entry currently listed.
+read; "Mark as read" marks the entries currently loaded in the panel and nothing
+else — unread entries beyond the list are untouched, so a shorter list is also a
+narrower action.
 
 | key | |
 |---|---|
 | `j` / `k`, arrows | move the selection |
 | `Enter` | open the selected entry |
 | `x` | mark the selected entry read |
-| `a` | mark all listed entries read |
+| `a` | mark the listed entries read |
 | `r` | refresh |
 | `c` | change credentials |
+| `s` | save the selected entry to your Miniflux save integration |
+| `,` | open settings |
 | `Escape` | close |
 
 ## Settings
 
 In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/omarchy/shell.json`):
 
-- **Entries to show** — how many entries to fetch, 5 to 100 (default 20).
+- **Entries to show** — how many entries the panel lists, 1 to 100 (default 10).
+  Also in the panel's **Settings** section, which steps by one up to ten and by
+  ten above it; the plugin's settings form takes any value in the range. Changing
+  it refetches the list.
+- **Refresh every (minutes)** — how often the list refreshes on its own: 30
+  minutes, 1, 2, 3, 6, 12 or 24 hours (default 30 minutes). Also reachable from
+  the panel's **Settings** button, which writes the same setting.
+- **Text size** — Small, Medium, Large or Extra large; scales every piece of
+  text in the panel. Also in the panel's **Settings** section, where picking a
+  size redraws the panel at that size straight away.
+- **Mark new entries on the bar** — on by default. When a background refresh
+  turns up entries that were not in the previous list, a dot appears on the bar
+  icon; opening the panel clears it. The first fetch after signing in only sets
+  the baseline, so it never starts out dotted. Also in the panel's **Settings**
+  section, as a switch.
 - **Unread entries only** — off also lists entries you have already read.
 
 ## Remove

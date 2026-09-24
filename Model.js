@@ -60,7 +60,7 @@ function authCommand() {
 // something to show.
 function entriesCommand(limit, unreadOnly) {
   var n = Number(limit)
-  if (!isFinite(n) || n < 1) n = 20
+  if (!isFinite(n) || n < 1) n = 10
   n = Math.min(100, Math.round(n))
   var query = "/v1/entries?order=published_at&direction=desc&limit=" + n
   if (unreadOnly) query += "&status=unread"
@@ -79,6 +79,23 @@ function markReadCommand(ids) {
   return ["bash", "-c",
     prelude + '\napi /v1/entries -X PUT -H "Content-Type: application/json" --data-binary "$1"',
     "miniflux", body]
+}
+
+// POST /v1/entries/{id}/save hands the entry to whatever third-party save
+// service the Miniflux account has configured -- the same thing "s" does in
+// the web UI. The id is a number we round ourselves, so it is safe in the URL.
+function saveEntryCommand(id) {
+  var n = Math.round(Number(id))
+  if (!isFinite(n)) return []
+  return ["bash", "-c", prelude + '\napi "$1" -X POST', "miniflux", "/v1/entries/" + n + "/save"]
+}
+
+// Why a save didn't go through. 403 is the one worth naming: Miniflux answers
+// that way when no save integration is enabled on the account.
+function saveEntryMessage(stderr, exitCode, status) {
+  if (status === 403)
+    return "Miniflux has no save integration enabled for this account."
+  return errorMessage(stderr, exitCode, status)
 }
 
 // What the settings form should show: the resolved server and username, and

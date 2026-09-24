@@ -24,18 +24,52 @@
     "allowMultiple": false,
     "defaultSection": "right",
     "defaults": {
-      "entryLimit": 20,
-      "unreadOnly": true
+      "entryLimit": 10,
+      "unreadOnly": true,
+      "refreshMinutes": 30,
+      "textSize": "medium",
+      "newEntryIndicator": true
     },
     "schema": [
       {
         "key": "entryLimit",
         "type": "integer",
         "label": "Entries to show",
-        "min": 5,
+        "min": 1,
         "max": 100,
-        "step": 5,
-        "defaultValue": 20
+        "step": 1,
+        "defaultValue": 10,
+        "description": "How many entries the panel lists, 1 to 100. Also reachable from the panel's Settings section."
+      },
+      {
+        "key": "refreshMinutes",
+        "type": "integer",
+        "label": "Refresh every (minutes)",
+        "min": 30,
+        "max": 1440,
+        "step": 30,
+        "defaultValue": 30,
+        "description": "How often the list refreshes on its own. 30 minutes is the shortest allowed."
+      },
+      {
+        "key": "textSize",
+        "type": "string",
+        "label": "Text size",
+        "defaultValue": "medium",
+        "options": [
+          { "value": "small", "label": "Small" },
+          { "value": "medium", "label": "Medium" },
+          { "value": "large", "label": "Large" },
+          { "value": "xlarge", "label": "Extra large" }
+        ],
+        "description": "How large the panel's text reads."
+      },
+      {
+        "key": "newEntryIndicator",
+        "type": "boolean",
+        "label": "Mark new entries on the bar",
+        "defaultValue": true,
+        "description": "Puts a dot on the bar icon when a refresh brings in entries you have not seen yet."
       },
       {
         "key": "unreadOnly",
