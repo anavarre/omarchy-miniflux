@@ -86,7 +86,7 @@ Panel {
     { keys: "j / k", what: "Move the selection" },
     { keys: "Enter", what: "Open the selected entry" },
     { keys: "x", what: "Mark the selected entry read" },
-    { keys: "a", what: "Mark the listed entries read" },
+    { keys: "Shift+a", what: "Mark the listed entries read" },
     { keys: "r", what: "Refresh now" },
     { keys: "s", what: "Save the selected entry" },
     { keys: ",", what: "Settings" },
@@ -603,7 +603,7 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (text === "r") root.refresh()
-        else if (text === "a") root.markAllRead()
+        else if (text === "A") root.markAllRead()
         else if (text === "c") root.openSignIn()
         else if (text === "s") root.saveSelected()
         else if (text === ",") root.settingsOpen = !root.settingsOpen

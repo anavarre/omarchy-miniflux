@@ -45,7 +45,7 @@ narrower action.
 | `j` / `k`, arrows | move the selection |
 | `Enter` | open the selected entry |
 | `x` | mark the selected entry read |
-| `a` | mark the listed entries read |
+| `Shift+a` | mark the listed entries read |
 | `r` | refresh |
 | `c` | change credentials |
 | `s` | save the selected entry to your Miniflux save integration |
