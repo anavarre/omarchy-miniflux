@@ -25,6 +25,10 @@ username and your password. The password is used once, to mint an API key throug
 `POST /v1/api-keys`; only that key is stored. Instances older than Miniflux 2.2.9 have
 no such endpoint, so there the password itself is kept instead.
 
+The address must be `https://` (a bare hostname gets it added). Plain `http://` is
+refused, since the password and API key would cross the network unencrypted — the one
+exception is an instance on this machine (`localhost`, `127.x.x.x`, `[::1]`).
+
 Credentials live in `~/.config/omarchy/miniflux/` — a `config` file with the server and
 username, and `token` (or `password`) alongside it, all `0600` in a `0700` directory.
 "Forget credentials" in the panel deletes them; the API key stays on the Miniflux side

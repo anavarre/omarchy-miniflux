@@ -9,13 +9,33 @@
 // curl reads the header or `user =` from a config file on stdin (-K -), so the
 // secret never appears in argv or in `ps`.
 //
-// Exit codes: 10 no server, 11 no username, 12 no secret, 20 request failed,
-// 21 credentials rejected.
+// Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
+// http:// off this machine, 20 request failed, 21 credentials rejected.
 var store = '"${MINIFLUX_PLUGIN_DIR:-$HOME/.config/omarchy/miniflux}"'
 
 // A curl config that writes the HTTP status on its own last line, so the
 // caller can tell 200 from 401 without a second request.
 var statusLine = 'write-out = "\\\\n%%{http_code}"\\n'
+
+// Basic auth and X-Auth-Token are both cleartext on the wire, so a plain
+// http:// server is refused unless it is loopback, where nothing leaves the
+// machine. The host is cut out of the URL (dropping any userinfo, so
+// http://localhost@evil.example is not mistaken for localhost) and matched
+// exactly. curl is never told to follow redirects, so an https:// server
+// cannot bounce a request down to http:// either.
+var plainFn = [
+  'plain() {',
+  '  case "$1" in http://*) ;; *) return 1 ;; esac',
+  '  h=${1#http://}; h=${h%%/*}; h=${h%%\\?*}; h=${h%%#*}; h=${h##*@}',
+  '  case "$h" in "[::1]"|"[::1]:"*) return 1 ;; esac',
+  '  h=${h%:*}',
+  '  case "$h" in',
+  '    localhost) return 1 ;;',
+  '    127.*) case "$h" in *[!0-9.]*) return 0 ;; esac; return 1 ;;',
+  '  esac',
+  '  return 0',
+  '}'
+].join("\n")
 
 // curl's -K parser reads `name = "value"` with backslash escapes, so a secret
 // carrying a quote or a backslash has to be escaped or it truncates the line.
@@ -39,6 +59,8 @@ var prelude = [
   'case "$server" in http://*|https://*) ;; "") ;; *) server="https://$server" ;; esac',
   'server="${server%/}"',
   '[ -n "$server" ] || exit 10',
+  plainFn,
+  'plain "$server" && exit 13',
   '[ -n "$token" ] || [ -n "$username" ] || exit 11',
   '[ -n "$token" ] || [ -n "$password" ] || exit 12',
   escFn,
@@ -136,6 +158,8 @@ function saveCommand() {
     'case "$server" in http://*|https://*) ;; *) server="https://$server" ;; esac',
     'server="${server%/}"',
     '[ -n "$server" ] || exit 10',
+    plainFn,
+    'plain "$server" && exit 13',
     '[ -n "$username" ] || exit 11',
     '[ -n "$password" ] || exit 12',
     escFn,
@@ -261,13 +285,16 @@ function decodeTitle(value) {
 // The prelude's own exit codes say what is missing before a request is even
 // attempted; curl's say the request itself went wrong.
 function needsSetup(exitCode) {
-  return exitCode === 10 || exitCode === 11 || exitCode === 12
+  return exitCode === 10 || exitCode === 11 || exitCode === 12 || exitCode === 13
 }
+
+var insecureMessage = "Miniflux must be reached over https:// — plain http:// would send your credentials unencrypted."
 
 function setupMessage(exitCode) {
   if (exitCode === 10) return "Enter the address of your Miniflux instance."
   if (exitCode === 11) return "Enter your Miniflux username."
   if (exitCode === 12) return "Enter your Miniflux password."
+  if (exitCode === 13) return insecureMessage
   return "Sign in to your Miniflux instance."
 }
 
@@ -275,6 +302,7 @@ function saveMessage(stderr, exitCode) {
   if (exitCode === 10) return "Server address is required."
   if (exitCode === 11) return "Username is required."
   if (exitCode === 12) return "Password is required."
+  if (exitCode === 13) return insecureMessage
   if (exitCode === 21) {
     var code = String(stderr || "").trim()
     if (code === "401" || code === "403") return "Miniflux rejected that username and password."
@@ -284,6 +312,7 @@ function saveMessage(stderr, exitCode) {
 }
 
 function errorMessage(stderr, exitCode, status) {
+  if (exitCode === 13) return insecureMessage
   if (status === 401 || status === 403) return "Miniflux rejected the stored credentials."
   if (status === 404) return "Not found — check the server address."
   if (status >= 500) return "Miniflux answered " + status + " — the server is unhappy."
