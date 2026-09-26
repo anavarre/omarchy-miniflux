@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# Runs every portable check: Model.js unit tests, bin/miniflux-api against a
-# fixture server, shellcheck, and qmllint against stub Omarchy/Quickshell
-# modules. None of it needs Omarchy or a display, so none of it proves the
-# plugin loads in a live shell; see README for what still has to be checked
-# there.
+# Runs every portable check: Model.js unit tests, bin/miniflux-api against
+# a fixture server, Service.qml state tests against a fake Quickshell.Io,
+# then shellcheck, and qmllint against stub Omarchy/Quickshell modules. None
+# of it needs Omarchy or a display, so none of it proves the plugin loads in
+# a live shell; see README for what still has to be checked there.
 #
-# A missing shellcheck or qmllint is skipped locally but fails under CI (when
-# CI is set), so a CI run cannot pass without every check. QMLLINT names a
-# qmllint to use; otherwise qmllint, then pyside6-qmllint, is looked up on
-# PATH.
+# A missing shellcheck, qmllint or PySide6 is skipped locally but fails under
+# CI (when CI is set), so a CI run cannot pass without every check. QMLLINT
+# names a qmllint to use; otherwise qmllint, then pyside6-qmllint, is looked
+# up on PATH. QMLTEST_PYTHON names a python with PySide6 for the service
+# tests; otherwise python3 is used if it has it.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -27,6 +28,14 @@ node --test tests/model.test.js || fail model
 
 step "bin/miniflux-api"
 bash tests/api.sh || fail api
+
+step "Service.qml"
+qmltest_python="${QMLTEST_PYTHON:-python3}"
+if "$qmltest_python" -c 'import PySide6.QtQuickTest' 2> /dev/null; then
+  "$qmltest_python" tests/qml/service/run.py || fail service
+else
+  missing service "PySide6 (for $qmltest_python)"
+fi
 
 step "shellcheck"
 if command -v shellcheck > /dev/null; then

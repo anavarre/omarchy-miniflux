@@ -529,7 +529,6 @@ Item {
         root.noteEntries(list)
         root.entries = root.withoutPending(list)
         root.total = Math.max(0, Model.totalEntries(response.body) - (list.length - root.entries.length))
-        root.errorText = ""
       } catch (e) {
         root.errorText = "Could not read the Miniflux response."
       }
@@ -563,9 +562,11 @@ Item {
         return
       }
       // The rows were taken out on the assumption this would work; refetching
-      // is the honest way to put back whatever is actually still unread.
-      root.errorText = Model.errorMessage(markStderr.text, exitCode, response.status)
+      // is the honest way to put back whatever is actually still unread. The
+      // refetch clears errorText as it starts, so the failure is set after it
+      // and stays up until the next refresh.
       root.refresh()
+      root.errorText = Model.errorMessage(markStderr.text, exitCode, response.status)
     }
   }
 }

@@ -132,12 +132,18 @@ tests/run
 runs the checks that need neither Omarchy nor a display: Node unit tests for
 `Model.js`; `bin/miniflux-api` against a fake Miniflux on `127.0.0.1` (argument
 checks, the plain-http refusal, the size and stderr caps, sign-in, key rotation and
-the store checks), with fictional credentials in a temporary store; `shellcheck`;
+the store checks), with fictional credentials in a temporary store; QtTest cases for
+`Service.qml` (`tests/qml/service`), where a fake `Quickshell.Io` Process never runs
+anything and each test finishes requests by hand — sign-in checks, refreshes folding
+into one follow-up, late answers dropped after a settings change or a forget, the
+mark-read queue and its failure path, the new-entry dot, save notices on panel close,
+and the IPC throttle and status; `shellcheck`;
 and `qmllint` against stub `qs.Ui`, `qs.Commons` and `Quickshell` modules in
 `tests/qml/imports`. The Omarchy stubs are generated from the upstream revision named
 at the top of each one by `tests/qml/stubgen.py`. It needs `node`, `python3` and
-`curl`; a missing `shellcheck` or `qmllint` (or `pyside6-qmllint`, or `QMLLINT=path`)
-is skipped, unless `CI` is set.
+`curl`; a missing `shellcheck` or `qmllint` (or `pyside6-qmllint`, or `QMLLINT=path`),
+or a `python3` without PySide6 (or `QMLTEST_PYTHON=path`), is skipped, unless `CI` is
+set. `tests/qml/service/run.py -functions test_name` runs one service test.
 
 Passing says nothing about the live shell: loading under Omarchy's real imports,
 panel placement, focus and IPC still have to be tried on Omarchy itself.
