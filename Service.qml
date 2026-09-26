@@ -286,6 +286,8 @@ Item {
     property int session: 0
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdout: StdioCollector { id: saveEntryStdout; waitForEnd: true }
     stderr: StdioCollector { id: saveEntryStderr; waitForEnd: true }
     onExited: function(exitCode) {
@@ -305,6 +307,8 @@ Item {
     property int session: 0
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdout: StdioCollector { id: configStdout; waitForEnd: true }
     onExited: function(exitCode) {
       if (exitCode !== 0 || configProcess.session !== root.session) return
@@ -324,6 +328,8 @@ Item {
     property string payload: ""
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdinEnabled: true
     stdout: StdioCollector { id: saveStdout; waitForEnd: true }
     stderr: StdioCollector { id: saveStderr; waitForEnd: true }
@@ -354,6 +360,8 @@ Item {
     id: forgetProcess
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stderr: StdioCollector { id: forgetStderr; waitForEnd: true }
     onExited: function(exitCode) {
       // A refused store (exit 24) removed nothing, so the files and the
@@ -383,6 +391,8 @@ Item {
     property int session: 0
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdout: StdioCollector { id: authStdout; waitForEnd: true }
     stderr: StdioCollector { id: authStderr; waitForEnd: true }
     onExited: function(exitCode) {
@@ -424,6 +434,8 @@ Item {
     property int generation: 0
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdout: StdioCollector { id: entriesStdout; waitForEnd: true }
     stderr: StdioCollector { id: entriesStderr; waitForEnd: true }
     onExited: function(exitCode) {
@@ -464,6 +476,8 @@ Item {
     property var ids: []
     running: false
     command: []
+    clearEnvironment: true
+    environment: Model.environment
     stdout: StdioCollector { id: markStdout; waitForEnd: true }
     stderr: StdioCollector { id: markStderr; waitForEnd: true }
     onExited: function(exitCode) {

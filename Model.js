@@ -14,6 +14,42 @@
 // 22 response too large, 23 API key could not be minted, 24 the credential
 // store is unsafe or could not be written.
 //
+// Every command runs /usr/bin/bash with a scrubbed environment (see
+// environment below) and PATH pinned to the system directories, so curl, sed
+// and the rest are always the distribution's binaries. Nothing inherited from
+// the shell's session can steer them: BASH_ENV would be sourced before the
+// script, an exported function could stand in for curl, and CURL_HOME or a
+// user PATH entry could swap in a different config or binary. PATH is set in
+// the script too, in case a host ignores clearEnvironment.
+var bash = "/usr/bin/bash"
+var baseline = 'set -u\nPATH=/usr/bin:/bin; export PATH'
+
+// The only variables a command sees. null means "pass through the value from
+// the shell's environment, if it has one" (Quickshell's clearEnvironment
+// semantics). HOME and XDG_CONFIG_HOME locate the store, the MINIFLUX_ ones
+// are the documented overrides, the proxy and CA variables keep a private
+// network or a self-signed instance reachable, and PATH is fixed.
+var environment = {
+  PATH: "/usr/bin:/bin",
+  HOME: null,
+  XDG_CONFIG_HOME: null,
+  MINIFLUX_PLUGIN_DIR: null,
+  MINIFLUX_SERVER: null,
+  MINIFLUX_USERNAME: null,
+  MINIFLUX_API_KEY: null,
+  MINIFLUX_PASSWORD: null,
+  https_proxy: null,
+  HTTPS_PROXY: null,
+  http_proxy: null,
+  all_proxy: null,
+  ALL_PROXY: null,
+  no_proxy: null,
+  NO_PROXY: null,
+  SSL_CERT_FILE: null,
+  SSL_CERT_DIR: null,
+  CURL_CA_BUNDLE: null
+}
+
 // The store is $MINIFLUX_PLUGIN_DIR, else omarchy/miniflux under
 // $XDG_CONFIG_HOME (which the XDG spec says to ignore unless absolute), else
 // under ~/.config. A store that is a symlink, not a directory, or owned by
@@ -101,7 +137,7 @@ var oneLineFn = 'oneLine() { printf \'%s\' "$1" | tr -d "\\r\\n"; }'
 var escFn = 'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'; }'
 
 var prelude = [
-  'set -u',
+  baseline,
   storeFn,
   'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
   'secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\\r\\n"; }',
@@ -140,7 +176,7 @@ function text(value) {
 
 // "are these credentials good" — GET /v1/me.
 function authCommand() {
-  return ["bash", "-c", prelude + '\napi /v1/me']
+  return [bash, "-c", prelude + '\napi /v1/me']
 }
 
 // The latest entries, newest published first. Unread only by default; the
@@ -152,7 +188,7 @@ function entriesCommand(limit, unreadOnly) {
   n = Math.min(100, Math.round(n))
   var query = "/v1/entries?order=published_at&direction=desc&limit=" + n
   if (unreadOnly) query += "&status=unread"
-  return ["bash", "-c", prelude + '\napi "$1"', "miniflux", query]
+  return [bash, "-c", prelude + '\napi "$1"', "miniflux", query]
 }
 
 // PUT /v1/entries marks a batch in one request. Entry ids are not secret, so
@@ -164,7 +200,7 @@ function markReadCommand(ids) {
     if (isFinite(n)) list.push(Math.round(n))
   }
   var body = '{"entry_ids":[' + list.join(",") + '],"status":"read"}'
-  return ["bash", "-c",
+  return [bash, "-c",
     prelude + '\napi /v1/entries -X PUT -H "Content-Type: application/json" --data-binary "$1"',
     "miniflux", body]
 }
@@ -175,7 +211,7 @@ function markReadCommand(ids) {
 function saveEntryCommand(id) {
   var n = Math.round(Number(id))
   if (!isFinite(n)) return []
-  return ["bash", "-c", prelude + '\napi "$1" -X POST', "miniflux", "/v1/entries/" + n + "/save"]
+  return [bash, "-c", prelude + '\napi "$1" -X POST', "miniflux", "/v1/entries/" + n + "/save"]
 }
 
 // Why a save didn't go through. 403 is the one worth naming: Miniflux answers
@@ -189,8 +225,8 @@ function saveEntryMessage(stderr, exitCode, status) {
 // What the settings form should show: the resolved server and username, and
 // whether a secret is on file. The secret itself is never printed.
 function configCommand() {
-  return ["bash", "-c", [
-    'set -u',
+  return [bash, "-c", [
+    baseline,
     storeFn,
     'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
     'server="${MINIFLUX_SERVER:-}"; [ -n "$server" ] || server=$(saved server)',
@@ -220,8 +256,8 @@ function configCommand() {
 // (see saveWarning) so the leftover key can be deleted by hand; 404 means it
 // is already gone. The shell's PID keeps two saves in one second apart.
 function saveCommand() {
-  return ["bash", "-c", [
-    'set -u',
+  return [bash, "-c", [
+    baseline,
     'umask 077',
     storeFn,
     'IFS= read -r server || true',
@@ -273,8 +309,8 @@ function saveCommand() {
 // Drops everything this plugin stored. Credentials from the environment are
 // not ours to remove.
 function forgetCommand() {
-  return ["bash", "-c", [
-    'set -u',
+  return [bash, "-c", [
+    baseline,
     storeFn,
     'rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"'
   ].join("\n")]

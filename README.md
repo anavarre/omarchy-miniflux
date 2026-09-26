@@ -18,6 +18,12 @@ omarchy bar move anavarre.miniflux --section right
 
 Requires `curl` and `bash`, both of which Omarchy already has.
 
+Requests run `/usr/bin/bash` with `PATH` fixed to `/usr/bin:/bin` and a scrubbed
+environment: only `HOME`, `XDG_CONFIG_HOME`, the `MINIFLUX_*` variables below, the
+proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case forms)
+and the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`) are passed
+through. `~/.curlrc` is ignored.
+
 ## Usage
 
 The first click opens a sign-in form: the address of your instance, your Miniflux
