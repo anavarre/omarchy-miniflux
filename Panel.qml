@@ -25,13 +25,13 @@ Panel {
   readonly property int entryLimit: root.miniflux.entryLimit
   // 1 up to the API's own ceiling, so the list can be as short or as long as
   // the user wants it.
-  readonly property int entryLimitMin: 1
-  readonly property int entryLimitMax: 100
+  readonly property int entryLimitMin: Model.entryLimitMin
+  readonly property int entryLimitMax: Model.entryLimitMax
   readonly property bool unreadOnly: root.miniflux.unreadOnly
   // Minutes between automatic refreshes; always one of the allowed steps.
   readonly property int refreshMinutes: root.miniflux.refreshMinutes
   // 30 minutes up to a day, so the interval can never hammer the instance.
-  readonly property var refreshChoices: [30, 60, 120, 180, 360, 720, 1440]
+  readonly property var refreshChoices: Model.refreshChoices
   readonly property int refreshMin: refreshChoices[0]
   readonly property int refreshMax: refreshChoices[refreshChoices.length - 1]
 
@@ -189,13 +189,7 @@ Panel {
   // Snaps whatever comes in to the nearest allowed choice, so a stored value
   // from an older version still lands on something valid.
   function setRefreshMinutes(minutes) {
-    var wanted = Number(minutes)
-    if (!isFinite(wanted)) wanted = root.refreshMin
-    var n = root.refreshChoices[0]
-    for (var i = 1; i < root.refreshChoices.length; i++) {
-      if (Math.abs(root.refreshChoices[i] - wanted) < Math.abs(n - wanted))
-        n = root.refreshChoices[i]
-    }
+    var n = Model.snapRefreshMinutes(minutes)
     if (n === root.refreshMinutes) return
     root.miniflux.refreshMinutes = n
     if (root.hostWidget && typeof root.hostWidget.saveRefreshMinutes === "function")
@@ -205,9 +199,8 @@ Panel {
   // Written back through the widget like the other panel-side settings. The
   // service refetches on its own when the limit changes.
   function setEntryLimit(value) {
-    var n = Math.round(Number(value))
-    if (!isFinite(n)) return
-    n = Math.max(root.entryLimitMin, Math.min(root.entryLimitMax, n))
+    if (!isFinite(Math.round(Number(value)))) return
+    var n = Model.clampEntryLimit(value)
     if (n === root.entryLimit) return
     root.miniflux.entryLimit = n
     if (root.hostWidget && typeof root.hostWidget.saveEntryLimit === "function")

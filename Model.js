@@ -393,3 +393,35 @@ function errorMessage(stderr, exitCode, status) {
   if (line) return line.trim().slice(0, 200)
   return "Request failed (exit " + exitCode + ")"
 }
+
+// Settings arrive from shell.json, which anyone can hand-edit, and the manifest
+// schema is only metadata — nothing enforces it. These bring every stored value
+// back inside what the plugin supports, so a typo or an old value can neither
+// break a binding nor turn the refresh timer into a tight loop.
+var entryLimitMin = 1
+var entryLimitMax = 100
+var refreshChoices = [30, 60, 120, 180, 360, 720, 1440]
+var textSizeValues = ["small", "medium", "large", "xlarge"]
+
+function clampEntryLimit(value) {
+  // Number() reads null, "" and false as 0; those mean "unset", not "one".
+  if (value === null || value === "" || typeof value === "boolean") return 10
+  var n = Math.round(Number(value))
+  if (!isFinite(n)) return 10
+  return Math.max(entryLimitMin, Math.min(entryLimitMax, n))
+}
+
+// The nearest allowed interval, so a value from an older version still lands
+// on a real choice.
+function snapRefreshMinutes(value) {
+  var wanted = Number(value)
+  if (!isFinite(wanted)) return refreshChoices[0]
+  var n = refreshChoices[0]
+  for (var i = 1; i < refreshChoices.length; i++)
+    if (Math.abs(refreshChoices[i] - wanted) < Math.abs(n - wanted)) n = refreshChoices[i]
+  return n
+}
+
+function knownTextSize(value) {
+  return textSizeValues.indexOf(value) >= 0 ? value : "medium"
+}

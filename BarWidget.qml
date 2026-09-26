@@ -1,6 +1,7 @@
 import QtQuick
 import Quickshell
 import qs.Ui
+import "Model.js" as Model
 
 BarWidget {
   id: root
@@ -30,11 +31,12 @@ BarWidget {
   // The shell injects settings into widgets, not panels or services, so they
   // are handed down here — and again whenever the user changes one. What the
   // service fetches goes to the service; how the panel reads stays with it.
+  // Every value is clamped on the way in, since shell.json is hand-editable.
   function injectService() {
     if (!root.service) return
-    root.service.entryLimit = root.setting("entryLimit", 10)
+    root.service.entryLimit = Model.clampEntryLimit(root.setting("entryLimit", 10))
     root.service.unreadOnly = root.setting("unreadOnly", true) === true
-    root.service.refreshMinutes = root.setting("refreshMinutes", 30)
+    root.service.refreshMinutes = Model.snapRefreshMinutes(root.setting("refreshMinutes", 30))
   }
 
   function injectPanel() {
@@ -44,7 +46,7 @@ BarWidget {
     panelLoader.item.anchorItem = button
     panelLoader.item.hostWidget = root
     panelLoader.item.service = root.service
-    panelLoader.item.textSize = root.setting("textSize", "medium")
+    panelLoader.item.textSize = Model.knownTextSize(root.setting("textSize", "medium"))
     panelLoader.item.newEntryIndicator = root.newEntryIndicator
   }
 
