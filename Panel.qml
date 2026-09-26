@@ -150,7 +150,12 @@ Panel {
   readonly property real maxListHeight: Math.max(Style.space(120),
     panel.cappedContentHeight(Style.space(560)) - panel.verticalContentInset - Style.space(80))
 
-  function open() { root.controller.show() }
+  // No payload key is acted on yet; parsing it first keeps a bad one from
+  // stopping the panel opening.
+  function open(payloadJson) {
+    Model.parsePayload(payloadJson)
+    root.controller.show()
+  }
   function close() { root.controller.hide() }
 
   function switchPanel(direction) {

@@ -299,3 +299,20 @@ function snapRefreshMinutes(value) {
 function knownTextSize(value) {
   return textSizeValues.indexOf(value) >= 0 ? value : "medium"
 }
+
+// What open() was handed, as a plain object. The shell drops payloads on its
+// way to a bar-widget panel today, but a caller can still pass one directly:
+// an empty string, a non-string, malformed JSON or JSON that is not an object
+// all come back as {}, so no payload can make open() throw.
+function parsePayload(payloadJson) {
+  if (payloadJson && typeof payloadJson === "object" && !Array.isArray(payloadJson))
+    return payloadJson
+  if (typeof payloadJson !== "string" || payloadJson.trim() === "") return {}
+  var value
+  try {
+    value = JSON.parse(payloadJson)
+  } catch (e) {
+    return {}
+  }
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+}
