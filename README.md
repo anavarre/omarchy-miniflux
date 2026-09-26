@@ -144,6 +144,8 @@ at the top of each one by `tests/qml/stubgen.py`. It needs `node`, `python3` and
 `curl`; a missing `shellcheck` or `qmllint` (or `pyside6-qmllint`, or `QMLLINT=path`),
 or a `python3` without PySide6 (or `QMLTEST_PYTHON=path`), is skipped, unless `CI` is
 set. `tests/qml/service/run.py -functions test_name` runs one service test.
+`.github/workflows/tests.yml` runs the same script with `CI` set on every push to
+`main` and every pull request, with `pyside6-essentials` pinned for the Qt checks.
 
 Passing says nothing about the live shell: loading under Omarchy's real imports,
 panel placement, focus and IPC still have to be tried on Omarchy itself.

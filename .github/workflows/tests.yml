@@ -1,0 +1,55 @@
+# Runs tests/run with CI set, so a missing shellcheck, qmllint or PySide6
+# fails the job instead of being skipped. Actions are pinned by commit, with
+# the release tag alongside; the token can only read the repository.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.13"
+
+      # shellcheck and curl ship with the runner image; the libraries are
+      # what Qt's offscreen platform loads.
+      - name: Install system packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            shellcheck curl libegl1 libgl1 libxkbcommon0 libfontconfig1 libglib2.0-0t64
+
+      # QtQuickTest and qmllint both come with pyside6-essentials.
+      - name: Install PySide6
+        run: |
+          python -m venv "$RUNNER_TEMP/qt"
+          "$RUNNER_TEMP/qt/bin/pip" install --disable-pip-version-check pyside6-essentials==6.11.2
+
+      - name: tests/run
+        env:
+          CI: "1"
+          QMLTEST_PYTHON: ${{ runner.temp }}/qt/bin/python
+          QMLLINT: ${{ runner.temp }}/qt/bin/pyside6-qmllint
+        run: tests/run
