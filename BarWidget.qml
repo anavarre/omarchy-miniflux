@@ -89,11 +89,20 @@ BarWidget {
     bar: root.bar
     // nf-md-rss (U+F09E)
     text: ""
-    tooltipText: root.newEntryIndicator && root.hasNewEntries
+    // The second line lists the clicks, since a middle-click refresh is not
+    // something anyone would guess.
+    tooltipText: (root.newEntryIndicator && root.hasNewEntries
       ? "Miniflux — new entries since you last looked"
-      : "Miniflux — latest unread entries"
+      : root.setting("unreadOnly", true) === true
+        ? "Miniflux — latest unread entries"
+        : "Miniflux — latest entries")
+      + "\nClick: open · Middle-click: refresh"
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.LeftButton) root.toggle()
+      // Refreshes without opening the panel; the service re-checks sign-in
+      // instead when signed out, and folds a click during a fetch into one
+      // follow-up, so repeated clicks cost at most one extra request.
+      else if (buttonCode === Qt.MiddleButton && root.service) root.service.refresh()
     }
 
     // A dot on the glyph's upper right: enough to notice in passing, small

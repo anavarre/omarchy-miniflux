@@ -53,6 +53,10 @@ Environment variables take precedence over the stored files, if you would rather
 them yourself: `MINIFLUX_SERVER`, `MINIFLUX_API_KEY`, or `MINIFLUX_USERNAME` plus
 `MINIFLUX_PASSWORD`. `MINIFLUX_PLUGIN_DIR` moves the store (point it at the real directory, not a symlink).
 
+On the bar icon, a click opens or closes the panel and a middle-click refreshes the
+list without opening it (or re-checks sign-in, when signed out); the tooltip lists
+both. Clicks during a fetch fold into one follow-up request.
+
 Each row shows the entry title, with its feed and age underneath. Clicking the title
 opens it in your default browser; the check button on the right marks that one entry
 read; "Mark as read" marks the entries currently loaded in the panel and nothing
