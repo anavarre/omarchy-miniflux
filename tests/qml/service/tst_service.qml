@@ -96,6 +96,16 @@ TestCase {
     compare(proc("entries"), null, "nothing is fetched signed out")
   }
 
+  function test_configFillsFormAndStoreDir() {
+    proc("auth").finish(11, "", "")
+    proc("config").finish(0, JSON.stringify({ server: "https://rss.example.test", username: "ann",
+      hasSecret: true, store: "~/.config/omarchy/miniflux" }) + "\n", "")
+    compare(svc.storedServer, "https://rss.example.test")
+    compare(svc.storedUsername, "ann")
+    compare(svc.hasSecret, true)
+    compare(svc.storeDir, "~/.config/omarchy/miniflux")
+  }
+
   function test_checkDuringCheckRunsOnceAfter() {
     var auth = proc("auth")
     svc.checkAuth()

@@ -148,7 +148,7 @@ check "the key is 0600" [ "$(mode "$store/token")" = 600 ]
 check "no temporary file is left" [ -z "$(find "$store" -name '.*' -type f)" ]
 check "config holds server and username" [ "$(cat "$store/config")" = "server=$base"$'\n'"username=ann" ]
 run -- config
-check "config reports without the secret" [ "$out" = "{\"server\":\"$base\",\"username\":\"ann\",\"hasSecret\":true}" ]
+check "config reports without the secret" [ "$out" = "{\"server\":\"$base\",\"username\":\"ann\",\"hasSecret\":true,\"store\":\"$store\"}" ]
 run -- auth
 check "auth uses the stored key" [ "$rc" -eq 0 ] && has "$(last_request)" '"seen": {"token": "key"}'
 
@@ -193,6 +193,19 @@ run MINIFLUX_SERVER='https://m.example/a"b\c' MINIFLUX_USERNAME="x\"y" -- config
 check "config escapes quotes and backslashes" [ "$(json)" = 'https://m.example/a"b\c|x"y' ]
 run MINIFLUX_SERVER=https://m.example MINIFLUX_USERNAME="$(printf 'a\tb\nc\r')" -- config
 check "config drops control characters" [ "$(json)" = 'https://m.example|abc' ]
+
+# The sign-in hint names the store config reports: MINIFLUX_PLUGIN_DIR, else
+# XDG_CONFIG_HOME when absolute, else ~/.config, with $HOME shown as ~.
+tilde='~'  # the literal ~ that config prints
+where() { printf '%s' "$out" | python3 -c 'import json, sys; print(json.load(sys.stdin)["store"])' 2>&1; }
+run MINIFLUX_PLUGIN_DIR= -- config
+check "config reports the default store under ~" [ "$(where)" = "$tilde/.config/omarchy/miniflux" ]
+run MINIFLUX_PLUGIN_DIR= XDG_CONFIG_HOME="$work/xdg" -- config
+check "config reports the XDG store" [ "$(where)" = "$work/xdg/omarchy/miniflux" ]
+run MINIFLUX_PLUGIN_DIR= XDG_CONFIG_HOME=relative -- config
+check "config ignores a relative XDG_CONFIG_HOME" [ "$(where)" = "$tilde/.config/omarchy/miniflux" ]
+run MINIFLUX_PLUGIN_DIR="$work/home/elsewhere" -- config
+check "config shows MINIFLUX_PLUGIN_DIR under ~" [ "$(where)" = "$tilde/elsewhere" ]
 
 # --- unwritable and unsafe stores ------------------------------------------
 # Root can write anywhere, so the unwritable case only means something as a

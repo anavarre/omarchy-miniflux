@@ -48,6 +48,9 @@ Item {
   // What is on file, for pre-filling the sign-in form. Never the secret.
   property string storedServer: ""
   property string storedUsername: ""
+  // Where bin/miniflux-api keeps credentials, as `config` reports it
+  // (MINIFLUX_PLUGIN_DIR or the XDG default, $HOME shown as ~).
+  property string storeDir: ""
 
   property bool loading: false
   property string errorText: ""
@@ -383,6 +386,7 @@ Item {
         root.storedServer = config.server
         root.storedUsername = config.username
         root.hasSecret = config.hasSecret
+        root.storeDir = config.store
       } catch (e) {
         // Nothing stored yet — the empty form is the right thing to show.
       }

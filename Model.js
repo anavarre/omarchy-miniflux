@@ -135,7 +135,8 @@ function parseConfig(raw) {
   return {
     server: text(data.server),
     username: text(data.username),
-    hasSecret: data.hasSecret === true
+    hasSecret: data.hasSecret === true,
+    store: text(data.store)
   }
 }
 

@@ -8,8 +8,9 @@
 #   entries LIMIT FILTER latest entries, LIMIT 1-100, FILTER unread|all
 #   mark ID...           mark those entries read
 #   save-entry ID        hand the entry to the account's save integration
-#   config               print the stored server, username and whether a
-#                        secret is on file, as JSON (never the secret)
+#   config               print the stored server, username, whether a secret
+#                        is on file and where the store is, as JSON (never
+#                        the secret)
 #   save                 read server, username and password from stdin, one
 #                        per line, verify them and store an API key
 #   forget               delete everything this plugin stored
@@ -188,8 +189,9 @@ cmd_save_entry() {
   api "/v1/entries/$1/save" -X POST
 }
 
-# What the settings form should show: the resolved server and username, and
-# whether a secret is on file. The secret itself is never printed. Control
+# What the settings form should show: the resolved server and username,
+# whether a secret is on file, and the store's path (with a leading $HOME
+# shown as ~) for the sign-in hint. The secret itself is never printed. Control
 # characters are dropped, since JSON forbids them raw inside a string and an
 # environment value can carry any of them.
 jsonText() { esc "$(printf '%s' "$1" | tr -d '\000-\037')"; }
@@ -198,7 +200,9 @@ cmd_config() {
   server="${MINIFLUX_SERVER:-}"; [ -n "$server" ] || server=$(saved server)
   username="${MINIFLUX_USERNAME:-}"; [ -n "$username" ] || username=$(saved username)
   if [ -n "${MINIFLUX_API_KEY:-}" ] || [ -s "$store/token" ] || [ -s "$store/password" ]; then has=true; fi
-  printf '{"server":"%s","username":"%s","hasSecret":%s}\n' "$(jsonText "$server")" "$(jsonText "$username")" "$has"
+  shown="$store"; case "$store" in "$HOME"/*) shown="~${store#"$HOME"}" ;; esac
+  printf '{"server":"%s","username":"%s","hasSecret":%s,"store":"%s"}\n' \
+    "$(jsonText "$server")" "$(jsonText "$username")" "$has" "$(jsonText "$shown")"
 }
 
 # Writes what the login form collected. Values arrive on stdin, one per line,

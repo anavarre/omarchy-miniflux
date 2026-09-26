@@ -71,9 +71,9 @@ test("splitResponse takes the status from the last line", () => {
 })
 
 test("parseConfig and parseMe read only the fields they need", () => {
-  assert.deepEqual(plain(Model.parseConfig(' {"server":"https://m.example","username":"ann","hasSecret":true}\n')),
-    { server: "https://m.example", username: "ann", hasSecret: true })
-  assert.deepEqual(plain(Model.parseConfig('{"hasSecret":"true"}')), { server: "", username: "", hasSecret: false })
+  assert.deepEqual(plain(Model.parseConfig(' {"server":"https://m.example","username":"ann","hasSecret":true,"store":"~/.config/omarchy/miniflux"}\n')),
+    { server: "https://m.example", username: "ann", hasSecret: true, store: "~/.config/omarchy/miniflux" })
+  assert.deepEqual(plain(Model.parseConfig('{"hasSecret":"true"}')), { server: "", username: "", hasSecret: false, store: "" })
   assert.throws(() => Model.parseConfig("not json"))
   assert.deepEqual(plain(Model.parseMe('{"username":"ann","is_admin":true}')), { username: "ann" })
 })

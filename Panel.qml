@@ -365,6 +365,7 @@ Panel {
     property bool hasSecret: false
     property string storedServer: ""
     property string storedUsername: ""
+    property string storeDir: ""
     property bool loading: false
     property string errorText: "The Miniflux service is not running. Re-enable the plugin; under a third-party bar, switch back to Omarchy's own bar."
     property string saveNotice: ""
@@ -504,7 +505,9 @@ Panel {
           Text {
             width: parent.width
             text: "The password is used once, to mint an API key that is stored instead. "
-                + "Instances older than 2.2.9 keep the password in ~/.config/omarchy/miniflux, readable only by you."
+                + "Instances older than 2.2.9 keep the password in "
+                + (root.miniflux.storeDir !== "" ? root.miniflux.storeDir : "the plugin's credential store")
+                + ", readable only by you."
             color: root.dim
             font.family: root.fontFamily
             font.pixelSize: root.fs(Style.font.caption)

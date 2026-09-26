@@ -36,6 +36,12 @@ username and your password. The password is used once, to mint an API key throug
 `POST /v1/api-keys`; only that key is stored. Instances older than Miniflux 2.2.9 have
 no such endpoint, so there the password itself is kept instead.
 
+The plugin keeps its own credentials because Miniflux has no desktop client or CLI
+with a sign-in to borrow: the REST API is the only way in, and every call needs a key
+or a password. Minting a key of its own gives the plugin one you can revoke on its own
+(under Settings → API keys, its description names this machine and when it was made) without touching your password.
+The sign-in form's hint names the store actually in use, as described below.
+
 The address must be `https://` (a bare hostname gets it added). Plain `http://` is
 refused, since the password and API key would cross the network unencrypted — the one
 exception is an instance on this machine (`localhost`, `127.x.x.x`, `[::1]`).
