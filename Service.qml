@@ -284,6 +284,53 @@ Item {
   // new-entry dot work before any panel has been opened.
   Component.onCompleted: root.checkAuth()
 
+  // When the last IPC refresh went out. A hotkey held down or a script in a
+  // loop would otherwise turn into one request per call; the panel's own "r"
+  // is not throttled, since a person pressing it is already rate-limited.
+  property double lastIpcRefresh: 0
+  readonly property int ipcRefreshFloorMs: 10000
+
+  // omarchy-shell anavarre.miniflux <method>. Every answer is a fixed word or
+  // a small JSON object of counts and flags: no server address, username,
+  // entry titles, error text or anything read from the credential store, so
+  // nothing a script logs can leak the account.
+  IpcHandler {
+    target: "anavarre.miniflux"
+
+    // "ok" when a fetch (or, signed out, a sign-in check) was started or
+    // queued behind the one in flight; "throttled" within 10 s of the last.
+    function refresh(): string {
+      var now = Date.now()
+      if (now - root.lastIpcRefresh < root.ipcRefreshFloorMs) return "throttled"
+      root.lastIpcRefresh = now
+      root.refresh()
+      return "ok"
+    }
+
+    // Opens or closes the panel on the focused bar, through the host's own
+    // toggle so it behaves like a click. "unavailable" when there is no live
+    // bar widget to open (a third-party bar, or the widget not placed).
+    function toggle(): string {
+      var id = root.manifest && root.manifest.id ? String(root.manifest.id) : "anavarre.miniflux"
+      var done = root.shell && typeof root.shell.toggle === "function" && root.shell.toggle(id, "{}")
+      return done ? "ok" : "unavailable"
+    }
+
+    // {"auth":"unknown|checking|ok|error","loading":bool,"error":bool,
+    //  "listed":n,"unread":n,"total":n,"new":bool}
+    function status(): string {
+      return JSON.stringify({
+        auth: root.authState,
+        loading: root.loading,
+        error: root.errorText !== "" || root.authError !== "",
+        listed: root.entries.length,
+        unread: root.listedUnread,
+        total: root.total,
+        "new": root.hasNewEntries
+      })
+    }
+  }
+
   // Keeps the list current in the background, so an open shows fresh entries
   // rather than starting a fetch you wait on. A manual refresh restarts it.
   Timer {

@@ -101,6 +101,24 @@ screen. It checks the stored sign-in when the shell starts, so the new-entry dot
 before the panel has ever been opened. Under a third-party bar that provides no plugin
 services, the panel says so instead of listing entries.
 
+The service also answers to `omarchy-shell anavarre.miniflux <method>`, for a hotkey
+or a status script:
+
+| method | does | answers |
+|---|---|---|
+| `refresh` | fetches the list now (or re-checks sign-in when signed out) | `ok`, or `throttled` within 10 s of the previous call |
+| `toggle` | opens or closes the panel, as a click on the bar icon would | `ok`, or `unavailable` with no live bar widget |
+| `status` | nothing | `{"auth":"ok","loading":false,"error":false,"listed":10,"unread":10,"total":42,"new":false}` |
+
+`auth` is `unknown`, `checking`, `ok` or `error`; `listed` and `unread` count the
+entries the panel holds, `total` those matching its filter on the instance. No answer
+carries the server address, username, entry titles or error text.
+
+```sh
+# Hyprland: Super+Alt+M toggles the panel
+bind = SUPER ALT, M, exec, omarchy-shell -q anavarre.miniflux toggle
+```
+
 ## Remove
 
 ```sh
