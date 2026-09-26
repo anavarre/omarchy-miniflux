@@ -133,8 +133,12 @@ Panel {
       root.hostWidget.saveNewEntryIndicator(on)
   }
 
+  // Colours come from the theme: foreground and urgent from the bar (the
+  // palette when there is none), muted and accent from the palette, and the
+  // row highlight from Style's hover fill so a theme's state styling applies.
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color dim: Qt.darker(foreground, 1.5)
+  readonly property color dim: Color.muted
+  readonly property color accent: Color.accent
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
@@ -632,7 +636,7 @@ Panel {
                   height: row.implicitHeight + Style.space(8)
                   radius: Style.space(4)
                   color: index === root.selected || rowHover.hovered
-                    ? Qt.rgba(root.foreground.r, root.foreground.g, root.foreground.b, 0.12)
+                    ? Style.hoverFillFor(root.foreground, root.accent, root.urgent)
                     : "transparent"
 
                   HoverHandler { id: rowHover }
