@@ -45,26 +45,32 @@
       },
       {
         "key": "refreshMinutes",
-        "type": "integer",
+        "type": "enum",
         "label": "Refresh every (minutes)",
-        "min": 30,
-        "max": 1440,
-        "step": 30,
+        "options": [
+          30,
+          60,
+          120,
+          180,
+          360,
+          720,
+          1440
+        ],
         "defaultValue": 30,
-        "description": "How often the list refreshes on its own. 30 minutes is the shortest allowed."
+        "description": "How often the list refreshes on its own: 30 minutes, 1, 2, 3, 6, 12 or 24 hours."
       },
       {
         "key": "textSize",
-        "type": "string",
+        "type": "enum",
         "label": "Text size",
         "defaultValue": "medium",
         "options": [
-          { "value": "small", "label": "Small" },
-          { "value": "medium", "label": "Medium" },
-          { "value": "large", "label": "Large" },
-          { "value": "xlarge", "label": "Extra large" }
+          "small",
+          "medium",
+          "large",
+          "xlarge"
         ],
-        "description": "How large the panel's text reads."
+        "description": "How large the panel's text reads: small, medium, large or xlarge (extra large)."
       },
       {
         "key": "newEntryIndicator",
