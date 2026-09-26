@@ -11,7 +11,7 @@
 //
 // Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
 // http:// off this machine, 20 request failed, 21 credentials rejected,
-// 22 response too large.
+// 22 response too large, 23 API key could not be minted.
 var store = '"${MINIFLUX_PLUGIN_DIR:-$HOME/.config/omarchy/miniflux}"'
 
 // A curl config that writes the HTTP status on its own last line, so the
@@ -22,8 +22,9 @@ var statusLine = 'write-out = "\\\\n%%{http_code}"\\n'
 // http:// server is refused unless it is loopback, where nothing leaves the
 // machine. The host is cut out of the URL (dropping any userinfo, so
 // http://localhost@evil.example is not mistaken for localhost) and matched
-// exactly. curl is never told to follow redirects, so an https:// server
-// cannot bounce a request down to http:// either.
+// exactly. curl is never told to follow redirects, and fetch() below pins the
+// protocol and ignores ~/.curlrc, so an https:// server cannot bounce a request
+// (and the X-Auth-Token header curl would carry along) down to http:// either.
 var plainFn = [
   'plain() {',
   '  case "$1" in http://*) ;; *) return 1 ;; esac',
@@ -45,12 +46,18 @@ var plainFn = [
 // so an overrun can be told apart from a body that merely fills it. The HTTP
 // status line from write-out counts toward the cap, which is generous enough
 // (100 entries with full content) not to matter.
+//
+// -q must come first: it stops curl reading ~/.curlrc, which could otherwise
+// switch on `location` or `insecure` and undo all of the above. --proto pins
+// the one scheme the server was accepted with, and --proto-redir keeps any
+// redirect on https:// should one ever be followed.
 var maxBytes = 16 * 1024 * 1024
 var fetchFn = [
   'cap=' + maxBytes,
   'fetch() {',
-  '  local LC_ALL=C out rc=0',
-  '  out=$(curl --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?',
+  '  local LC_ALL=C out rc=0 proto==https',
+  '  case "$server" in http://*) proto==http ;; esac',
+  '  out=$(curl -q --proto "$proto" --proto-redir =https --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?',
   '  if [ "$rc" -eq 63 ] || [ "${#out}" -gt "$cap" ]; then',
   '    printf \'Miniflux sent more than %s MiB.\\n\' $((cap / 1048576)) >&2; return 22',
   '  fi',
@@ -61,8 +68,10 @@ var fetchFn = [
 
 // curl's -K parser reads `name = "value"` with backslash escapes, so a secret
 // carrying a quote or a backslash has to be escaped or it truncates the line.
-// Values are read one per line, so no newline can reach this to start a new
-// directive; this is about passwords that are merely awkward, not hostile.
+// Every value is read one line at a time or has CR/LF stripped (oneLine), so
+// no newline can reach this to start a new directive; this is about passwords
+// that are merely awkward, not hostile.
+var oneLineFn = 'oneLine() { printf \'%s\' "$1" | tr -d "\\r\\n"; }'
 var escFn = 'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'; }'
 
 var prelude = [
@@ -72,11 +81,12 @@ var prelude = [
   'secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\\r\\n"; }',
   'server="${MINIFLUX_SERVER:-}"',
   '[ -n "$server" ] || server=$(saved server)',
-  'username="${MINIFLUX_USERNAME:-}"',
+  oneLineFn,
+  'username=$(oneLine "${MINIFLUX_USERNAME:-}")',
   '[ -n "$username" ] || username=$(saved username)',
-  'token="${MINIFLUX_API_KEY:-}"',
+  'token=$(oneLine "${MINIFLUX_API_KEY:-}")',
   '[ -n "$token" ] || token=$(secret "$store/token")',
-  'password="${MINIFLUX_PASSWORD:-}"',
+  'password=$(oneLine "${MINIFLUX_PASSWORD:-}")',
   '[ -n "$password" ] || password=$(secret "$store/password")',
   'case "$server" in http://*|https://*) ;; "") ;; *) server="https://$server" ;; esac',
   'server="${server%/}"',
@@ -170,6 +180,19 @@ function configCommand() {
 // so the password never appears in argv. The login is verified before anything
 // is stored, and an API key is minted from it when the instance supports one
 // (Miniflux 2.2.9+) so the password does not have to be kept at all.
+//
+// The password is kept only when the instance has no key endpoint (404/405).
+// Any other mint failure stops before the store is touched, rather than
+// quietly downgrading to a stored password. Miniflux requires key descriptions
+// to be unique per user, so each one carries the machine name and the time.
+//
+// The minted key's id is kept in token-id so the key it replaces can be
+// revoked. That happens last, only once the new token is on disk, and failing
+// to revoke never fails the save: a leftover key is cheaper than no working
+// one. Keys are never matched by description, which two machines can share.
+// A revoke the server refuses is reported on stdout as `revoke-failed <id>`
+// (see saveWarning) so the leftover key can be deleted by hand; 404 means it
+// is already gone. The shell's PID keeps two saves in one second apart.
 function saveCommand() {
   return ["bash", "-c", [
     'set -u',
@@ -191,18 +214,31 @@ function saveCommand() {
     'me=$(auth | fetch "$server/v1/me") || exit $?',
     'code=$(printf \'%s\' "$me" | tail -n1)',
     '[ "$code" = "200" ] || { printf \'%s\\n\' "$code" >&2; exit 21; }',
+    'desc="Omarchy bar widget ($(uname -n | tr -cd "A-Za-z0-9.-") $(date -u +%Y-%m-%dT%H:%M:%SZ) $$)"',
+    'key=$(auth | fetch -X POST -H "Content-Type: application/json" --data-binary "{\\"description\\":\\"$desc\\"}" "$server/v1/api-keys") || exit $?',
+    'kcode=$(printf \'%s\' "$key" | tail -n1)',
+    'tok=""; kid=""',
+    'case "$kcode" in',
+    '  201) tok=$(printf \'%s\' "$key" | sed -n \'s/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)',
+    '       kid=$(printf \'%s\' "$key" | sed -n \'s/.*"id"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p\' | head -n1)',
+    '       [ -n "$tok" ] || { printf \'%s\\n\' "$kcode" >&2; exit 23; } ;;',
+    '  404|405) ;;',
+    '  *) printf \'%s\\n\' "$kcode" >&2; exit 23 ;;',
+    'esac',
+    'old=""; [ -r "$store/token-id" ] && old=$(head -n1 "$store/token-id" | tr -cd "0-9")',
+    'oldserver=""; [ -r "$store/config" ] && oldserver=$(sed -n "s/^server=//p" "$store/config" | head -n1)',
     'mkdir -p "$store" && chmod 700 "$store"',
     'printf \'server=%s\\nusername=%s\\n\' "$server" "$username" > "$store/config"',
     'chmod 600 "$store/config"',
-    'key=$(auth | fetch -X POST -H "Content-Type: application/json" --data-binary \'{"description":"Omarchy bar widget"}\' "$server/v1/api-keys") || key=""',
-    'tok=""',
-    'if [ "$(printf \'%s\' "$key" | tail -n1)" = "201" ]; then',
-    '  tok=$(printf \'%s\' "$key" | sed -n \'s/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)',
-    'fi',
     'if [ -n "$tok" ]; then',
     '  printf \'%s\' "$tok" > "$store/token"; chmod 600 "$store/token"; rm -f "$store/password"',
+    '  if [ -n "$kid" ]; then printf \'%s\' "$kid" > "$store/token-id"; chmod 600 "$store/token-id"; else rm -f "$store/token-id"; fi',
+    '  if [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then',
+    '    rv=$(auth | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""',
+    '    case "$(printf \'%s\' "$rv" | tail -n1)" in 204|404) ;; *) printf \'revoke-failed %s\\n\' "$old" ;; esac',
+    '  fi',
     'else',
-    '  printf \'%s\' "$password" > "$store/password"; chmod 600 "$store/password"; rm -f "$store/token"',
+    '  printf \'%s\' "$password" > "$store/password"; chmod 600 "$store/password"; rm -f "$store/token" "$store/token-id"',
     'fi'
   ].join("\n")]
 }
@@ -213,7 +249,7 @@ function forgetCommand() {
   return ["bash", "-c", [
     'set -u',
     'store=' + store,
-    'rm -f "$store/config" "$store/token" "$store/password"'
+    'rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"'
   ].join("\n")]
 }
 
@@ -332,12 +368,24 @@ function saveMessage(stderr, exitCode) {
     if (code === "401" || code === "403") return "Miniflux rejected that username and password."
     return "Miniflux answered " + (code || "an error") + " — check the server address."
   }
+  if (exitCode === 23) {
+    var answered = String(stderr || "").trim()
+    return "Miniflux would not create an API key (answered " + (answered || "an error") + "). Nothing was saved."
+  }
   return errorMessage(stderr, exitCode, 0)
+}
+
+// A save that succeeded can still leave the replaced API key behind on the
+// server. Returns what to tell the user about it, or "" when all went well.
+function saveWarning(stdout) {
+  var m = /^revoke-failed (\d+)$/m.exec(String(stdout || ""))
+  if (!m) return ""
+  return "Signed in. The previous API key (#" + m[1] + ") could not be revoked — delete it under Settings → API keys."
 }
 
 function errorMessage(stderr, exitCode, status) {
   if (exitCode === 13) return insecureMessage
-  if (status === 401 || status === 403) return "Miniflux rejected the stored credentials."
+  if (status === 401 || status === 403) return "Miniflux rejected the stored credentials — the API key may have been revoked or the password changed. Sign in again to fix it."
   if (status === 404) return "Not found — check the server address."
   if (status >= 500) return "Miniflux answered " + status + " — the server is unhappy."
   if (status > 0 && (status < 200 || status >= 300)) return "Miniflux answered " + status + "."

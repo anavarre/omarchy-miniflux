@@ -355,8 +355,10 @@ Panel {
     saveEntryProcess.running = true
   }
 
-  function noteSaved(message) {
+  // A notice that asks for action stays up long enough to be read and acted on.
+  function noteSaved(message, ms) {
     root.saveNotice = message
+    saveNoticeTimer.interval = ms || 4000
     saveNoticeTimer.restart()
   }
 
@@ -438,7 +440,7 @@ Panel {
     running: false
     command: []
     stdinEnabled: true
-    stdout: StdioCollector { waitForEnd: true }
+    stdout: StdioCollector { id: saveStdout; waitForEnd: true }
     stderr: StdioCollector { id: saveStderr; waitForEnd: true }
     onStarted: {
       write(payload)
@@ -455,6 +457,8 @@ Panel {
       }
       passField.text = ""
       root.hasSecret = true
+      var warning = Model.saveWarning(saveStdout.text)
+      if (warning !== "") root.noteSaved(warning, 15000)
       root.configuring = false
       root.authState = "unknown"
       root.checkAuth()

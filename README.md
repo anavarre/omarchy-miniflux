@@ -30,9 +30,10 @@ refused, since the password and API key would cross the network unencrypted — 
 exception is an instance on this machine (`localhost`, `127.x.x.x`, `[::1]`).
 
 Credentials live in `~/.config/omarchy/miniflux/` — a `config` file with the server and
-username, and `token` (or `password`) alongside it, all `0600` in a `0700` directory.
-"Forget credentials" in the panel deletes them; the API key stays on the Miniflux side
-until you revoke it under Settings → API keys.
+username, and `token` plus its `token-id` (or `password`) alongside it, all `0600` in a
+`0700` directory. Signing in again on the same server mints a fresh key and then
+revokes the one it replaces. "Forget credentials" in the panel deletes the local files;
+the API key stays on the Miniflux side until you revoke it under Settings → API keys.
 
 Environment variables take precedence over the stored files, if you would rather manage
 them yourself: `MINIFLUX_SERVER`, `MINIFLUX_API_KEY`, or `MINIFLUX_USERNAME` plus
