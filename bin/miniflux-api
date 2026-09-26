@@ -25,7 +25,8 @@
 # Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
 # http:// off this machine, 20 request failed, 21 credentials rejected,
 # 22 response too large, 23 API key could not be minted, 24 the credential
-# store is unsafe or could not be written, 64 bad arguments.
+# store is unsafe or could not be written, 64 bad arguments. Whatever goes to
+# stderr is cut off after the first 2 KiB (see the end of the script).
 
 set -u
 # PATH is pinned here as well as in Model.environment, so curl, sed and the
@@ -44,7 +45,10 @@ usage() { printf 'miniflux-api: %s\n' "$1" >&2; exit 64; }
 cfg="${XDG_CONFIG_HOME:-}"; case "$cfg" in /*) ;; *) cfg="$HOME/.config" ;; esac
 store="${MINIFLUX_PLUGIN_DIR:-$cfg/omarchy/miniflux}"
 unsafe() { [ -L "$store" ] || { [ -e "$store" ] && { [ ! -d "$store" ] || [ ! -O "$store" ]; }; }; }
-unsafe && { printf 'Refusing the credential store %s: it must be a directory you own, not a symlink.\n' "$store" >&2; exit 24; }
+refuseUnsafe() {
+  unsafe && { printf 'Refusing the credential store %s: it must be a directory you own, not a symlink.\n' "$store" >&2; exit 24; }
+  return 0
+}
 
 saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }
 secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\r\n"; }
@@ -262,15 +266,29 @@ cmd_forget() {
   rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"
 }
 
-[ "$#" -gt 0 ] || usage "no command given"
-command="$1"; shift
-case "$command" in
-  auth) cmd_auth "$@" ;;
-  entries) cmd_entries "$@" ;;
-  mark) cmd_mark "$@" ;;
-  save-entry) cmd_save_entry "$@" ;;
-  config) cmd_config "$@" ;;
-  save) cmd_save "$@" ;;
-  forget) cmd_forget "$@" ;;
-  *) usage "unknown command: $command" ;;
-esac
+main() {
+  refuseUnsafe
+  [ "$#" -gt 0 ] || usage "no command given"
+  local command="$1"; shift
+  case "$command" in
+    auth) cmd_auth "$@" ;;
+    entries) cmd_entries "$@" ;;
+    mark) cmd_mark "$@" ;;
+    save-entry) cmd_save_entry "$@" ;;
+    config) cmd_config "$@" ;;
+    save) cmd_save "$@" ;;
+    forget) cmd_forget "$@" ;;
+    *) usage "unknown command: $command" ;;
+  esac
+}
+
+# stderr is capped here, where it is produced, so no curl or coreutils error
+# (which can quote a whole URL or path) can grow the text the panel collects.
+# The command's stdout goes out through fd 3 untouched and its stderr through
+# the pipe; cat drains whatever is past the cap so a chatty command never dies
+# of SIGPIPE, and bash waits for both sides before exiting, so the panel sees
+# the capped text before the exit status.
+errcap=2048
+exec 3>&1
+main "$@" 2>&1 >&3 3>&- | { head -c "$errcap"; cat > /dev/null; } >&2
+exit "${PIPESTATUS[0]}"

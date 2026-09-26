@@ -228,15 +228,21 @@ function saveMessage(stderr, exitCode) {
   if (exitCode === 12) return "Password is required."
   if (exitCode === 13) return insecureMessage
   if (exitCode === 21) {
-    var code = String(stderr || "").trim()
+    var code = answeredStatus(stderr)
     if (code === "401" || code === "403") return "Miniflux rejected that username and password."
     return "Miniflux answered " + (code || "an error") + " — check the server address."
   }
-  if (exitCode === 23) {
-    var answered = String(stderr || "").trim()
-    return "Miniflux would not create an API key (answered " + (answered || "an error") + "). Nothing was saved."
-  }
+  if (exitCode === 23)
+    return "Miniflux would not create an API key (answered " + (answeredStatus(stderr) || "an error") + "). Nothing was saved."
   return errorMessage(stderr, exitCode, 0)
+}
+
+// Exits 21 and 23 put the HTTP status alone on stderr. Anything that is not a
+// bare three-digit code (curl's "000", a stray error line) is left out rather
+// than pasted into the message.
+function answeredStatus(stderr) {
+  var code = String(stderr || "").trim()
+  return /^[1-5][0-9][0-9]$/.test(code) ? code : ""
 }
 
 // A save that succeeded can still leave the replaced API key behind on the
@@ -253,6 +259,9 @@ function errorMessage(stderr, exitCode, status) {
   if (status === 404) return "Not found — check the server address."
   if (status >= 500) return "Miniflux answered " + status + " — the server is unhappy."
   if (status > 0 && (status < 200 || status >= 300)) return "Miniflux answered " + status + "."
+  // bin/miniflux-api caps stderr at 2 KiB; only its last line is shown, and
+  // only the first 200 characters of that, so a long URL or path in a curl
+  // error cannot stretch the panel.
   var line = String(stderr || "").split("\n").filter(function (l) { return l.trim() !== "" }).pop()
   if (line) return line.trim().slice(0, 200)
   if (exitCode === 24) return "The credential store could not be written."

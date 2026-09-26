@@ -26,7 +26,8 @@ proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case for
 and the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`) are passed
 through. `~/.curlrc` is ignored. To debug a sign-in, run it yourself:
 `bin/miniflux-api auth` prints the `/v1/me` answer and its HTTP status, or exits with
-one of the codes listed at the top of the script.
+one of the codes listed at the top of the script. Its error output is cut off after
+2 KiB, and the panel shows at most 200 characters of it.
 
 ## Usage
 
