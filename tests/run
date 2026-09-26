@@ -36,11 +36,10 @@ else
 fi
 
 # Imports resolve to tests/qml/imports, generated from the Omarchy revision
-# named in each stub, plus hand-written Quickshell stubs. Two categories are
-# off: unqualified, because delegates read their Repeater's modelData and the
-# panel's id, which qmllint flags without ComponentBehavior: Bound; and
-# unused-imports, because the Quickshell stub is empty while the real module
-# is not. Any other warning, a missing property above all, fails the step.
+# named in each stub, plus hand-written Quickshell stubs. One category is
+# off: unused-imports, because the Quickshell stub is empty while the real
+# module is not. Any other warning, a missing property or an unqualified
+# access above all, fails the step.
 step "qmllint"
 qmllint="${QMLLINT:-}"
 if [ -z "$qmllint" ]; then
@@ -49,7 +48,7 @@ if [ -z "$qmllint" ]; then
   done
 fi
 if [ -n "$qmllint" ]; then
-  "$qmllint" --max-warnings 0 --unqualified disable --unused-imports disable -I tests/qml/imports \
+  "$qmllint" --max-warnings 0 --unused-imports disable -I tests/qml/imports \
     BarWidget.qml Panel.qml Service.qml || fail qmllint
 else
   missing qmllint qmllint

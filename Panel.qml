@@ -1,3 +1,4 @@
+pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import qs.Commons
@@ -634,13 +635,14 @@ Panel {
                 model: root.entries
 
                 Rectangle {
+                  id: entryRow
                   required property int index
                   required property var modelData
 
                   width: parent.width
                   height: row.implicitHeight + Style.space(8)
                   radius: Style.space(4)
-                  color: index === root.selected || rowHover.hovered
+                  color: entryRow.index === root.selected || rowHover.hovered
                     ? Style.hoverFillFor(root.foreground, root.accent, root.urgent)
                     : "transparent"
 
@@ -666,8 +668,8 @@ Panel {
 
                       TapHandler {
                         onTapped: {
-                          root.selected = index
-                          root.openEntry(index)
+                          root.selected = entryRow.index
+                          root.openEntry(entryRow.index)
                         }
                       }
 
@@ -676,7 +678,7 @@ Panel {
                         // Feed text, so never AutoText: rich text would let a
                         // title pull a remote <img> when the panel opens.
                         textFormat: Text.PlainText
-                        text: Model.decodeTitle(modelData.title)
+                        text: Model.decodeTitle(entryRow.modelData.title)
                         color: root.foreground
                         font.family: root.fontFamily
                         font.pixelSize: root.fs(Style.font.body)
@@ -689,7 +691,7 @@ Panel {
                       Text {
                         width: parent.width
                         textFormat: Text.PlainText
-                        text: [modelData.feed, Model.formatAge(modelData.published)]
+                        text: [entryRow.modelData.feed, Model.formatAge(entryRow.modelData.published)]
                           .filter(function(v) { return v !== "" }).join(" · ")
                         color: root.dim
                         font.family: root.fontFamily
@@ -707,7 +709,7 @@ Panel {
                       foreground: root.dim
                       hoverColor: root.foreground
                       fontSize: root.fs(Style.font.bodySmall)
-                      onClicked: root.markRead([modelData.id])
+                      onClicked: root.markRead([entryRow.modelData.id])
                     }
                   }
                 }
@@ -1092,6 +1094,7 @@ Panel {
             model: root.shortcuts
 
             Item {
+              id: shortcutRow
               required property var modelData
 
               width: parent.width
@@ -1101,7 +1104,7 @@ Panel {
                 id: keyLabel
                 anchors.left: parent.left
                 width: Style.space(Math.round(76 * root.textScale))
-                text: modelData.keys
+                text: shortcutRow.modelData.keys
                 color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: root.fs(Style.font.bodySmall)
@@ -1112,7 +1115,7 @@ Panel {
                 id: whatLabel
                 anchors.left: keyLabel.right
                 anchors.right: parent.right
-                text: modelData.what
+                text: shortcutRow.modelData.what
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: root.fs(Style.font.bodySmall)
