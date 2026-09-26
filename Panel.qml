@@ -202,8 +202,8 @@ Panel {
       root.hostWidget.saveRefreshMinutes(n)
   }
 
-  // Written back through the widget like the other panel-side settings, and
-  // the list is refetched so the new count is visible straight away.
+  // Written back through the widget like the other panel-side settings. The
+  // service refetches on its own when the limit changes.
   function setEntryLimit(value) {
     var n = Math.round(Number(value))
     if (!isFinite(n)) return
@@ -212,7 +212,6 @@ Panel {
     root.miniflux.entryLimit = n
     if (root.hostWidget && typeof root.hostWidget.saveEntryLimit === "function")
       root.hostWidget.saveEntryLimit(n)
-    if (root.authenticated) root.miniflux.refresh()
   }
 
   // One at a time up to ten, then in tens — a short list is tuned precisely,

@@ -58,7 +58,26 @@ Item {
   // request goes out — the round trip is the slow part, and a row that lingers
   // invites a second click on something already gone. A failure puts the whole
   // list back by refetching.
-  property var pending: []
+  // Ids in flight or queued, as a map. A fetch that lands meanwhile still has
+  // them unread, so they are filtered out of it rather than flickering back.
+  property var pending: ({})
+  // Ids marked while a request was already out. Sent as one batch when it
+  // returns, so a quick second click is never dropped.
+  property var markQueue: []
+
+  // Requests finish in whatever order the network allows. Each process
+  // records the generation it started under and drops its result if that has
+  // moved on: session changes on sign-in and forget, so nothing fetched with
+  // the old credentials lands after them; listGeneration also changes with
+  // the list settings, so a fetch for the old limit never overwrites a newer
+  // one.
+  property int session: 0
+  property int listGeneration: 0
+  // A refresh asked for while one is in flight runs once it returns, instead
+  // of being dropped — its settings or the server may have changed since.
+  property bool refreshQueued: false
+  // Same for a sign-in check asked for while one is running.
+  property bool authRecheck: false
 
   // Set when a background refresh turns up entry ids that were not in the
   // previous list while no panel was open. The bar widget reads it to paint
@@ -118,12 +137,22 @@ Item {
   }
 
   function loadConfig() {
+    if (configProcess.running) return
+    configProcess.session = root.session
     configProcess.command = Model.configCommand()
     configProcess.running = true
   }
 
+  function newSession() {
+    root.session++
+    root.listGeneration++
+    root.refreshQueued = false
+    root.markQueue = []
+    root.pending = ({})
+  }
+
   function signIn(server, username, password) {
-    if (root.saving) return
+    if (root.saving || forgetProcess.running) return
     root.saving = true
     root.clearAuthMessages()
     saveProcess.payload = String(server).trim() + "\n" + String(username).trim() + "\n" + String(password) + "\n"
@@ -132,39 +161,73 @@ Item {
   }
 
   function forget() {
+    if (root.saving || forgetProcess.running) return
+    root.newSession()
     forgetProcess.command = Model.forgetCommand()
     forgetProcess.running = true
   }
 
   function checkAuth() {
-    if (root.authState === "checking") return
     root.authState = "checking"
+    if (authProcess.running) { root.authRecheck = true; return }
+    authProcess.session = root.session
     authProcess.command = Model.authCommand()
     authProcess.running = true
   }
 
   function refresh() {
     if (!root.authenticated) { root.checkAuth(); return }
-    if (root.loading) return
+    if (entriesProcess.running) { root.refreshQueued = true; return }
+    root.refreshQueued = false
     root.loading = true
     root.errorText = ""
+    entriesProcess.generation = root.listGeneration
     entriesProcess.command = Model.entriesCommand(root.entryLimit, root.unreadOnly)
     entriesProcess.running = true
     autoRefresh.restart()
   }
 
+  // A changed limit or filter makes any fetch in flight the wrong list.
+  function listSettingsChanged() {
+    root.listGeneration++
+    if (root.authenticated) root.refresh()
+  }
+  onEntryLimitChanged: root.listSettingsChanged()
+  onUnreadOnlyChanged: root.listSettingsChanged()
+
+  function withoutPending(list) {
+    var kept = []
+    for (var i = 0; i < list.length; i++)
+      if (!root.pending[list[i].id]) kept.push(list[i])
+    return kept
+  }
+
   // Marks a batch read and takes those rows out of the list straight away.
   function markRead(ids) {
-    if (!root.authenticated || ids.length === 0) return
-    var gone = {}
-    for (var i = 0; i < ids.length; i++) gone[ids[i]] = true
-    var kept = []
-    for (var j = 0; j < root.entries.length; j++) {
-      if (!gone[root.entries[j].id]) kept.push(root.entries[j])
+    if (!root.authenticated) return
+    var pending = Object.assign({}, root.pending)
+    var fresh = []
+    for (var i = 0; i < ids.length; i++) {
+      if (pending[ids[i]]) continue
+      pending[ids[i]] = true
+      fresh.push(ids[i])
     }
-    root.entries = kept
-    root.total = Math.max(0, root.total - ids.length)
-    root.pending = ids
+    if (fresh.length === 0) return
+    root.pending = pending
+    root.entries = root.withoutPending(root.entries)
+    root.total = Math.max(0, root.total - fresh.length)
+    root.markQueue = root.markQueue.concat(fresh)
+    root.flushMarks()
+  }
+
+  // Sends everything queued as one batch, unless a request is already out;
+  // its completion flushes again.
+  function flushMarks() {
+    if (markProcess.running || root.markQueue.length === 0) return
+    var ids = root.markQueue
+    root.markQueue = []
+    markProcess.session = root.session
+    markProcess.ids = ids
     markProcess.command = Model.markReadCommand(ids)
     markProcess.running = true
   }
@@ -186,6 +249,7 @@ Item {
     if (!root.authenticated || root.saveEntryBusy) return
     root.saveEntryBusy = true
     root.saveNotice = ""
+    saveEntryProcess.session = root.session
     saveEntryProcess.command = Model.saveEntryCommand(id)
     saveEntryProcess.running = true
   }
@@ -219,12 +283,14 @@ Item {
 
   Process {
     id: saveEntryProcess
+    property int session: 0
     running: false
     command: []
     stdout: StdioCollector { id: saveEntryStdout; waitForEnd: true }
     stderr: StdioCollector { id: saveEntryStderr; waitForEnd: true }
     onExited: function(exitCode) {
       root.saveEntryBusy = false
+      if (saveEntryProcess.session !== root.session) return
       var response = Model.splitResponse(saveEntryStdout.text)
       if (exitCode === 0 && (response.status === 202 || response.status === 200 || response.status === 204)) {
         root.noteSaved("Saved.")
@@ -236,11 +302,12 @@ Item {
 
   Process {
     id: configProcess
+    property int session: 0
     running: false
     command: []
     stdout: StdioCollector { id: configStdout; waitForEnd: true }
     onExited: function(exitCode) {
-      if (exitCode !== 0) return
+      if (exitCode !== 0 || configProcess.session !== root.session) return
       try {
         var config = Model.parseConfig(configStdout.text)
         root.storedServer = config.server
@@ -273,6 +340,7 @@ Item {
         root.authError = Model.saveMessage(saveStderr.text, exitCode)
         return
       }
+      root.newSession()
       root.hasSecret = true
       var warning = Model.saveWarning(saveStdout.text)
       if (warning !== "") root.noteSaved(warning, 15000)
@@ -304,11 +372,19 @@ Item {
 
   Process {
     id: authProcess
+    property int session: 0
     running: false
     command: []
     stdout: StdioCollector { id: authStdout; waitForEnd: true }
     stderr: StdioCollector { id: authStderr; waitForEnd: true }
     onExited: function(exitCode) {
+      // Asked again while this one ran — its answer may predate a sign-in.
+      if (root.authRecheck) {
+        root.authRecheck = false
+        Qt.callLater(root.checkAuth)
+        return
+      }
+      if (authProcess.session !== root.session) return
       if (Model.needsSetup(exitCode)) {
         root.authState = "error"
         root.authError = ""
@@ -337,12 +413,20 @@ Item {
 
   Process {
     id: entriesProcess
+    property int generation: 0
     running: false
     command: []
     stdout: StdioCollector { id: entriesStdout; waitForEnd: true }
     stderr: StdioCollector { id: entriesStderr; waitForEnd: true }
     onExited: function(exitCode) {
       root.loading = false
+      // A newer refresh is waiting, or this one answers for settings or a
+      // session that are gone: run the follow-up instead of showing it.
+      if (root.refreshQueued || entriesProcess.generation !== root.listGeneration) {
+        if (root.refreshQueued && root.authenticated) Qt.callLater(root.refresh)
+        root.refreshQueued = false
+        return
+      }
       var response = Model.splitResponse(entriesStdout.text)
       if (response.status === 401 || response.status === 403) {
         root.authState = "error"
@@ -355,9 +439,10 @@ Item {
         return
       }
       try {
-        root.entries = Model.parseEntries(response.body)
-        root.noteEntries(root.entries)
-        root.total = Model.totalEntries(response.body)
+        var list = Model.parseEntries(response.body)
+        root.noteEntries(list)
+        root.entries = root.withoutPending(list)
+        root.total = Math.max(0, Model.totalEntries(response.body) - (list.length - root.entries.length))
         root.errorText = ""
       } catch (e) {
         root.errorText = "Could not read the Miniflux response."
@@ -367,6 +452,8 @@ Item {
 
   Process {
     id: markProcess
+    property int session: 0
+    property var ids: []
     running: false
     command: []
     stdout: StdioCollector { id: markStdout; waitForEnd: true }
@@ -374,7 +461,12 @@ Item {
     onExited: function(exitCode) {
       var response = Model.splitResponse(markStdout.text)
       var ok = exitCode === 0 && (response.status === 204 || response.status === 200)
-      root.pending = []
+      if (markProcess.session !== root.session) return
+      var pending = Object.assign({}, root.pending)
+      for (var i = 0; i < markProcess.ids.length; i++) delete pending[markProcess.ids[i]]
+      root.pending = pending
+      markProcess.ids = []
+      Qt.callLater(root.flushMarks)
       if (ok) {
         // Marking the list read can empty it while the instance still holds
         // unread entries the limit kept out. Pulling the next batch straight
