@@ -10,7 +10,8 @@
 // secret never appears in argv or in `ps`.
 //
 // Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
-// http:// off this machine, 20 request failed, 21 credentials rejected.
+// http:// off this machine, 20 request failed, 21 credentials rejected,
+// 22 response too large.
 var store = '"${MINIFLUX_PLUGIN_DIR:-$HOME/.config/omarchy/miniflux}"'
 
 // A curl config that writes the HTTP status on its own last line, so the
@@ -34,6 +35,27 @@ var plainFn = [
   '    127.*) case "$h" in *[!0-9.]*) return 0 ;; esac; return 1 ;;',
   '  esac',
   '  return 0',
+  '}'
+].join("\n")
+
+// Every request gets a connect timeout, a total deadline and a size cap, so a
+// slow or oversized answer cannot hold a request open or balloon the stdout the
+// panel collects. --max-filesize stops early when the server announces a size;
+// head -c is the backstop for a body that doesn't, reading one byte past the cap
+// so an overrun can be told apart from a body that merely fills it. The HTTP
+// status line from write-out counts toward the cap, which is generous enough
+// (100 entries with full content) not to matter.
+var maxBytes = 16 * 1024 * 1024
+var fetchFn = [
+  'cap=' + maxBytes,
+  'fetch() {',
+  '  local LC_ALL=C out rc=0',
+  '  out=$(curl --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?',
+  '  if [ "$rc" -eq 63 ] || [ "${#out}" -gt "$cap" ]; then',
+  '    printf \'Miniflux sent more than %s MiB.\\n\' $((cap / 1048576)) >&2; return 22',
+  '  fi',
+  '  [ "$rc" -eq 0 ] || return 20',
+  '  printf \'%s\\n\' "$out"',
   '}'
 ].join("\n")
 
@@ -64,6 +86,7 @@ var prelude = [
   '[ -n "$token" ] || [ -n "$username" ] || exit 11',
   '[ -n "$token" ] || [ -n "$password" ] || exit 12',
   escFn,
+  fetchFn,
   'auth() {',
   '  if [ -n "$token" ]; then printf \'header = "X-Auth-Token: %s"\\n\' "$(esc "$token")"',
   '  else printf \'user = "%s:%s"\\n\' "$(esc "$username")" "$(esc "$password")"; fi',
@@ -71,7 +94,7 @@ var prelude = [
   'api() {',
   '  path="$1"; shift',
   '  { auth; printf \'silent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\'; } |',
-  '    curl -K - "$@" "$server$path" || exit 20',
+  '    fetch "$@" "$server$path" || exit $?',
   '}'
 ].join("\n")
 
@@ -163,14 +186,15 @@ function saveCommand() {
     '[ -n "$username" ] || exit 11',
     '[ -n "$password" ] || exit 12',
     escFn,
+    fetchFn,
     'auth() { printf \'user = "%s:%s"\\nsilent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\' "$(esc "$username")" "$(esc "$password")"; }',
-    'me=$(auth | curl -K - "$server/v1/me") || exit 20',
+    'me=$(auth | fetch "$server/v1/me") || exit $?',
     'code=$(printf \'%s\' "$me" | tail -n1)',
     '[ "$code" = "200" ] || { printf \'%s\\n\' "$code" >&2; exit 21; }',
     'mkdir -p "$store" && chmod 700 "$store"',
     'printf \'server=%s\\nusername=%s\\n\' "$server" "$username" > "$store/config"',
     'chmod 600 "$store/config"',
-    'key=$(auth | curl -K - -X POST -H "Content-Type: application/json" --data-binary \'{"description":"Omarchy bar widget"}\' "$server/v1/api-keys") || key=""',
+    'key=$(auth | fetch -X POST -H "Content-Type: application/json" --data-binary \'{"description":"Omarchy bar widget"}\' "$server/v1/api-keys") || key=""',
     'tok=""',
     'if [ "$(printf \'%s\' "$key" | tail -n1)" = "201" ]; then',
     '  tok=$(printf \'%s\' "$key" | sed -n \'s/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)',
