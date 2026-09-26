@@ -14,6 +14,8 @@ points MINIFLUX_SERVER:
   /big        every answer is one byte over the 16 MiB cap, no Content-Length
   /bigcl      the same with a Content-Length header, so curl can refuse early
   /revokefail DELETE /v1/api-keys/... answers 500
+  /notoken    POST /v1/api-keys answers 201 without a token
+  /nosave     POST /v1/entries/{id}/save answers 403 (no save integration)
 
 The API key or basic-auth pair a request carried is echoed back by /v1/me as
 "seen", so a test can check the script quoted it for curl correctly.
@@ -67,7 +69,7 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         body = self.rfile.read(length).decode() if length else ""
         mode, _, rest = self.path.lstrip("/").partition("/")
-        if mode not in ("old", "big", "bigcl", "revokefail"):
+        if mode not in ("old", "big", "bigcl", "revokefail", "notoken", "nosave"):
             mode, rest = "", self.path.lstrip("/")
         route = "/" + rest.split("?")[0]
         query = rest.partition("?")[2]
@@ -88,6 +90,8 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/v1/api-keys" and self.command == "POST":
             if mode == "old":
                 return self.reply(404, b"404 page not found")
+            if mode == "notoken":
+                return self.reply(201, {"id": 99, "description": "x"})
             key_id = next_key[0]
             next_key[0] += 1
             return self.reply(201, {"id": key_id, "token": KEY, "description": "x"})
@@ -98,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/v1/entries" and self.command == "PUT":
             return self.reply(204)
         if route.startswith("/v1/entries/") and route.endswith("/save"):
-            return self.reply(202)
+            return self.reply(403 if mode == "nosave" else 202)
         return self.reply(404, b"404 page not found")
 
     do_GET = do_POST = do_PUT = do_DELETE = handle_any

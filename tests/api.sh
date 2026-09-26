@@ -170,6 +170,41 @@ fresh
 input="$base/old"$'\nann\npw\n' expect_rc "save on an instance without API keys" 0 -- save
 check "keeps the password instead" [ "$(cat "$store/password")" = pw ] && [ ! -e "$store/token" ]
 
+fresh
+input="$base/notoken"$'\nann\npw\n' expect_rc "a key answer without a token" 23 -- save
+check "reports the status of the key answer" [ "$err" = 201 ]
+check "a failed mint leaves no store behind" [ ! -e "$store" ]
+
+run "${key[@]}" MINIFLUX_SERVER="$base/nosave" -- save-entry 4
+check "save-entry passes a 403 through" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 403 ]
+
+# --- the environment wins over the store -----------------------------------
+fresh
+input="$base"$'\nann\npw\n' run -- save
+expect_rc "MINIFLUX_SERVER overrides the stored server" 20 MINIFLUX_SERVER=http://127.0.0.1:1 -- auth
+run MINIFLUX_API_KEY=other -- auth
+check "MINIFLUX_API_KEY overrides the stored key" has "$(last_request)" '"seen": {"token": "other"}'
+run MINIFLUX_USERNAME=bob -- config
+check "config reports the environment's username" has "$out" '"username":"bob"'
+
+# config is parsed as JSON by the panel, so no value may break the quoting.
+json() { printf '%s' "$out" | python3 -c 'import json, sys; d = json.load(sys.stdin); print(d["server"] + "|" + d["username"])' 2>&1; }
+run MINIFLUX_SERVER='https://m.example/a"b\c' MINIFLUX_USERNAME="x\"y" -- config
+check "config escapes quotes and backslashes" [ "$(json)" = 'https://m.example/a"b\c|x"y' ]
+run MINIFLUX_SERVER=https://m.example MINIFLUX_USERNAME="$(printf 'a\tb\nc\r')" -- config
+check "config drops control characters" [ "$(json)" = 'https://m.example|abc' ]
+
+# --- unwritable and unsafe stores ------------------------------------------
+# Root can write anywhere, so the unwritable case only means something as a
+# regular user.
+if [ "$(id -u)" -ne 0 ]; then
+  mkdir "$work/readonly"; chmod 500 "$work/readonly"
+  store="$work/readonly/store"
+  input="$base"$'\nann\npw\n' expect_rc "a store that cannot be created" 24 -- save
+  check "says it could not create the store" has "$err" "Could not create"
+  chmod 700 "$work/readonly"
+fi
+
 # --- unsafe stores ---------------------------------------------------------
 fresh
 mkdir "$work/elsewhere"
