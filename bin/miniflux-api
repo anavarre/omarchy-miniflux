@@ -221,7 +221,7 @@ cmd_save() {
   IFS= read -r server || true
   IFS= read -r username || true
   IFS= read -r password || true
-  case "$server" in http://*|https://*) ;; *) server="https://$server" ;; esac
+  case "$server" in http://*|https://*) ;; "") ;; *) server="https://$server" ;; esac
   server="${server%/}"
   [ -n "$server" ] || exit 10
   plain "$server" && exit 13

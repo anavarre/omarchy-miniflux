@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Runs every portable check: Model.js unit tests, bin/miniflux-api against a
+# fixture server, shellcheck, and qmllint against stub Omarchy/Quickshell
+# modules. None of it needs Omarchy or a display, so none of it proves the
+# plugin loads in a live shell; see README for what still has to be checked
+# there.
+#
+# A missing shellcheck or qmllint is skipped locally but fails under CI (when
+# CI is set), so a CI run cannot pass without every check. QMLLINT names a
+# qmllint to use; otherwise qmllint, then pyside6-qmllint, is looked up on
+# PATH.
+
+set -u
+cd "$(dirname "$0")/.." || exit 1
+
+failed=""
+skipped=""
+step() { printf '\n== %s\n' "$1"; }
+fail() { failed="$failed $1"; }
+missing() {
+  if [ -n "${CI:-}" ]; then printf '%s is not installed\n' "$2" >&2; fail "$1"
+  else printf 'skipped: %s is not installed\n' "$2"; skipped="$skipped $1"; fi
+}
+
+step "Model.js"
+node --test tests/model.test.js || fail model
+
+step "bin/miniflux-api"
+bash tests/api.sh || fail api
+
+step "shellcheck"
+if command -v shellcheck > /dev/null; then
+  shellcheck bin/miniflux-api tests/run tests/api.sh || fail shellcheck
+else
+  missing shellcheck shellcheck
+fi
+
+# Imports resolve to tests/qml/imports, generated from the Omarchy revision
+# named in each stub, plus hand-written Quickshell stubs. Two categories are
+# off: unqualified, because delegates read their Repeater's modelData and the
+# panel's id, which qmllint flags without ComponentBehavior: Bound; and
+# unused-imports, because the Quickshell stub is empty while the real module
+# is not. Any other warning, a missing property above all, fails the step.
+step "qmllint"
+qmllint="${QMLLINT:-}"
+if [ -z "$qmllint" ]; then
+  for candidate in qmllint pyside6-qmllint; do
+    if command -v "$candidate" > /dev/null; then qmllint=$candidate; break; fi
+  done
+fi
+if [ -n "$qmllint" ]; then
+  "$qmllint" --max-warnings 0 --unqualified disable --unused-imports disable -I tests/qml/imports \
+    BarWidget.qml Panel.qml Service.qml || fail qmllint
+else
+  missing qmllint qmllint
+fi
+
+printf '\n'
+[ -z "$skipped" ] || printf 'skipped:%s\n' "$skipped"
+if [ -n "$failed" ]; then printf 'FAILED:%s\n' "$failed"; exit 1; fi
+printf 'all checks passed\n'

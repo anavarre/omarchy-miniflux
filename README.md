@@ -123,6 +123,25 @@ carries the server address, username, entry titles or error text.
 bind = SUPER ALT, M, exec, omarchy-shell -q anavarre.miniflux toggle
 ```
 
+## Tests
+
+```sh
+tests/run
+```
+
+runs the checks that need neither Omarchy nor a display: Node unit tests for
+`Model.js`; `bin/miniflux-api` against a fake Miniflux on `127.0.0.1` (argument
+checks, the plain-http refusal, the size and stderr caps, sign-in, key rotation and
+the store checks), with fictional credentials in a temporary store; `shellcheck`;
+and `qmllint` against stub `qs.Ui`, `qs.Commons` and `Quickshell` modules in
+`tests/qml/imports`. The Omarchy stubs are generated from the upstream revision named
+at the top of each one by `tests/qml/stubgen.py`. It needs `node`, `python3` and
+`curl`; a missing `shellcheck` or `qmllint` (or `pyside6-qmllint`, or `QMLLINT=path`)
+is skipped, unless `CI` is set.
+
+Passing says nothing about the live shell: loading under Omarchy's real imports,
+panel placement, focus and IPC still have to be tried on Omarchy itself.
+
 ## Remove
 
 ```sh

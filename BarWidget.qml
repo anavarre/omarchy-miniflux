@@ -7,6 +7,9 @@ BarWidget {
   id: root
   moduleName: "anavarre.miniflux"
 
+  // Loader.item is typed QObject, so qmllint cannot see Panel.qml's members
+  // through it; the forwarding below is checked on the panel side instead.
+  // qmllint disable missing-property
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
 
   // The plugin's Service.qml singleton, shared by every monitor's widget. The
@@ -27,6 +30,7 @@ BarWidget {
   function close() { if (panelLoader.item) panelLoader.item.close() }
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
+  // qmllint enable missing-property
 
   // The shell injects settings into widgets, not panels or services, so they
   // are handed down here — and again whenever the user changes one. What the
