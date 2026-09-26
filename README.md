@@ -29,15 +29,18 @@ The address must be `https://` (a bare hostname gets it added). Plain `http://` 
 refused, since the password and API key would cross the network unencrypted — the one
 exception is an instance on this machine (`localhost`, `127.x.x.x`, `[::1]`).
 
-Credentials live in `~/.config/omarchy/miniflux/` — a `config` file with the server and
-username, and `token` plus its `token-id` (or `password`) alongside it, all `0600` in a
-`0700` directory. Signing in again on the same server mints a fresh key and then
+Credentials live in `$XDG_CONFIG_HOME/omarchy/miniflux/` (`~/.config/omarchy/miniflux/`
+by default) — a `config` file with the server and username, and `token` plus its
+`token-id` (or `password`) alongside it, all `0600` in a `0700` directory. Each file is
+written to a temporary name and renamed into place, so an interrupted save never leaves
+half a key behind. The plugin refuses a store that is a symlink or belongs to another
+user, rather than reading or writing through it. Signing in again on the same server mints a fresh key and then
 revokes the one it replaces. "Forget credentials" in the panel deletes the local files;
 the API key stays on the Miniflux side until you revoke it under Settings → API keys.
 
 Environment variables take precedence over the stored files, if you would rather manage
 them yourself: `MINIFLUX_SERVER`, `MINIFLUX_API_KEY`, or `MINIFLUX_USERNAME` plus
-`MINIFLUX_PASSWORD`. `MINIFLUX_PLUGIN_DIR` moves the store.
+`MINIFLUX_PASSWORD`. `MINIFLUX_PLUGIN_DIR` moves the store (point it at the real directory, not a symlink).
 
 Each row shows the entry title, with its feed and age underneath. Clicking the title
 opens it in your default browser; the check button on the right marks that one entry

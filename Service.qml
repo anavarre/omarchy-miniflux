@@ -354,7 +354,15 @@ Item {
     id: forgetProcess
     running: false
     command: []
-    onExited: {
+    stderr: StdioCollector { id: forgetStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      // A refused store (exit 24) removed nothing, so the files and the
+      // sign-in state stay as they were.
+      if (exitCode !== 0) {
+        root.authError = Model.errorMessage(forgetStderr.text, exitCode, 0)
+        root.authHint = ""
+        return
+      }
       root.hasSecret = false
       root.storedServer = ""
       root.storedUsername = ""

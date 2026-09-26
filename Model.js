@@ -11,8 +11,34 @@
 //
 // Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
 // http:// off this machine, 20 request failed, 21 credentials rejected,
-// 22 response too large, 23 API key could not be minted.
-var store = '"${MINIFLUX_PLUGIN_DIR:-$HOME/.config/omarchy/miniflux}"'
+// 22 response too large, 23 API key could not be minted, 24 the credential
+// store is unsafe or could not be written.
+//
+// The store is $MINIFLUX_PLUGIN_DIR, else omarchy/miniflux under
+// $XDG_CONFIG_HOME (which the XDG spec says to ignore unless absolute), else
+// under ~/.config. A store that is a symlink, not a directory, or owned by
+// someone else is refused outright: reading it could hand another user's
+// server our requests, and writing through it could put the API key wherever
+// the link points.
+var storeFn = [
+  'cfg="${XDG_CONFIG_HOME:-}"; case "$cfg" in /*) ;; *) cfg="$HOME/.config" ;; esac',
+  'store="${MINIFLUX_PLUGIN_DIR:-$cfg/omarchy/miniflux}"',
+  'unsafe() { [ -L "$store" ] || { [ -e "$store" ] && { [ ! -d "$store" ] || [ ! -O "$store" ]; }; }; }',
+  'unsafe && { printf \'Refusing the credential store %s: it must be a directory you own, not a symlink.\\n\' "$store" >&2; exit 24; }'
+].join("\n")
+
+// Each file is written to a temporary name inside the store and renamed into
+// place, so a crash or a full disk leaves the old file whole rather than a
+// truncated secret, and rename replaces a planted symlink instead of
+// following it. mktemp creates the file 0600 before anything is written.
+var putFn = [
+  'put() {',
+  '  local t',
+  '  t=$(mktemp "$store/.$1.XXXXXX") || exit 24',
+  '  if printf \'%s\' "$2" > "$t" && chmod 600 "$t" && mv -f "$t" "$store/$1"; then return 0; fi',
+  '  rm -f "$t"; printf \'Could not write %s.\\n\' "$store/$1" >&2; exit 24',
+  '}'
+].join("\n")
 
 // A curl config that writes the HTTP status on its own last line, so the
 // caller can tell 200 from 401 without a second request.
@@ -76,7 +102,7 @@ var escFn = 'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'
 
 var prelude = [
   'set -u',
-  'store=' + store,
+  storeFn,
   'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
   'secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\\r\\n"; }',
   'server="${MINIFLUX_SERVER:-}"',
@@ -165,7 +191,7 @@ function saveEntryMessage(stderr, exitCode, status) {
 function configCommand() {
   return ["bash", "-c", [
     'set -u',
-    'store=' + store,
+    storeFn,
     'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
     'server="${MINIFLUX_SERVER:-}"; [ -n "$server" ] || server=$(saved server)',
     'username="${MINIFLUX_USERNAME:-}"; [ -n "$username" ] || username=$(saved username)',
@@ -197,7 +223,7 @@ function saveCommand() {
   return ["bash", "-c", [
     'set -u',
     'umask 077',
-    'store=' + store,
+    storeFn,
     'IFS= read -r server || true',
     'IFS= read -r username || true',
     'IFS= read -r password || true',
@@ -227,18 +253,19 @@ function saveCommand() {
     'esac',
     'old=""; [ -r "$store/token-id" ] && old=$(head -n1 "$store/token-id" | tr -cd "0-9")',
     'oldserver=""; [ -r "$store/config" ] && oldserver=$(sed -n "s/^server=//p" "$store/config" | head -n1)',
-    'mkdir -p "$store" && chmod 700 "$store"',
-    'printf \'server=%s\\nusername=%s\\n\' "$server" "$username" > "$store/config"',
-    'chmod 600 "$store/config"',
+    'mkdir -p "$store" && chmod 700 "$store" || { printf \'Could not create %s.\\n\' "$store" >&2; exit 24; }',
+    'unsafe && exit 24',
+    putFn,
+    'put config "server=$server"$\'\\n\'"username=$username"$\'\\n\'',
     'if [ -n "$tok" ]; then',
-    '  printf \'%s\' "$tok" > "$store/token"; chmod 600 "$store/token"; rm -f "$store/password"',
-    '  if [ -n "$kid" ]; then printf \'%s\' "$kid" > "$store/token-id"; chmod 600 "$store/token-id"; else rm -f "$store/token-id"; fi',
+    '  put token "$tok"; rm -f "$store/password"',
+    '  if [ -n "$kid" ]; then put token-id "$kid"; else rm -f "$store/token-id"; fi',
     '  if [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then',
     '    rv=$(auth | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""',
     '    case "$(printf \'%s\' "$rv" | tail -n1)" in 204|404) ;; *) printf \'revoke-failed %s\\n\' "$old" ;; esac',
     '  fi',
     'else',
-    '  printf \'%s\' "$password" > "$store/password"; chmod 600 "$store/password"; rm -f "$store/token" "$store/token-id"',
+    '  put password "$password"; rm -f "$store/token" "$store/token-id"',
     'fi'
   ].join("\n")]
 }
@@ -248,7 +275,7 @@ function saveCommand() {
 function forgetCommand() {
   return ["bash", "-c", [
     'set -u',
-    'store=' + store,
+    storeFn,
     'rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"'
   ].join("\n")]
 }
@@ -391,6 +418,7 @@ function errorMessage(stderr, exitCode, status) {
   if (status > 0 && (status < 200 || status >= 300)) return "Miniflux answered " + status + "."
   var line = String(stderr || "").split("\n").filter(function (l) { return l.trim() !== "" }).pop()
   if (line) return line.trim().slice(0, 200)
+  if (exitCode === 24) return "The credential store could not be written."
   return "Request failed (exit " + exitCode + ")"
 }
 
