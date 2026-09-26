@@ -53,6 +53,9 @@ Item {
   property string errorText: ""
   // Transient confirmation for the save shortcut, shown under the header.
   property string saveNotice: ""
+  // A notice that asks for action (a key that could not be revoked) outlasts
+  // a closed panel; a plain "Saved." does not.
+  property bool saveNoticeSticky: false
   property bool saveEntryBusy: false
   property var entries: []
   property int total: 0
@@ -108,10 +111,18 @@ Item {
   function panelOpened() {
     root.openPanels++
     root.clearNewEntries()
+    if (root.saveNotice !== "" && !saveNoticeTimer.running) saveNoticeTimer.restart()
   }
 
+  // A save confirmation belongs to the panel it was shown in. Once the last
+  // one closes it is dropped, rather than reappearing on the next open with
+  // part of its time already spent. A sticky notice is kept instead, with its
+  // clock stopped, and gets its full time again on the next open.
   function panelClosed() {
     root.openPanels = Math.max(0, root.openPanels - 1)
+    if (root.openPanels > 0) return
+    saveNoticeTimer.stop()
+    if (!root.saveNoticeSticky) root.saveNotice = ""
   }
 
   // Folds a freshly fetched list into the baseline and reports whether any of
@@ -258,10 +269,15 @@ Item {
   }
 
   // A notice that asks for action stays up long enough to be read and acted on.
-  function noteSaved(message, ms) {
+  // A plain confirmation that lands after every panel closed has nobody to
+  // tell, so it is dropped; a sticky one waits for the next open.
+  function noteSaved(message, ms, sticky) {
+    if (!sticky && root.openPanels === 0) return
     root.saveNotice = message
+    root.saveNoticeSticky = sticky === true
     saveNoticeTimer.interval = ms || 4000
-    saveNoticeTimer.restart()
+    if (root.openPanels > 0) saveNoticeTimer.restart()
+    else saveNoticeTimer.stop()
   }
 
   // Sign-in is checked once at load, so the refresh timer and the bar's
@@ -352,7 +368,7 @@ Item {
       root.newSession()
       root.hasSecret = true
       var warning = Model.saveWarning(saveStdout.text)
-      if (warning !== "") root.noteSaved(warning, 15000)
+      if (warning !== "") root.noteSaved(warning, 15000, true)
       root.signedIn()
       root.authState = "unknown"
       root.checkAuth()

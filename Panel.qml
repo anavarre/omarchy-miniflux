@@ -286,8 +286,19 @@ Panel {
   // The first open has nothing stored yet, so it lands on the sign-in form;
   // every later open refetches, because a feed list read an hour ago is stale.
   // The service already holds the last list, so that shows while it fetches.
+  //
+  // Every close path (Escape, outside click, opening an entry, the host
+  // hiding the panel) lands here. A typed password never outlives the panel
+  // it was typed into, and the cheat sheet does not greet the next open. A
+  // sign-in already sent has read the field, so clearing it cannot cut one
+  // short.
   onOpenedChanged: {
-    if (!opened) { root.trackClose(); return }
+    if (!opened) {
+      passField.text = ""
+      root.shortcutsOpen = false
+      root.trackClose()
+      return
+    }
     root.trackOpen()
     root.selected = -1
     root.settingsOpen = false
