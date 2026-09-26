@@ -78,6 +78,15 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   section, as a switch.
 - **Unread entries only** — off also lists entries you have already read.
 
+## How it runs
+
+A background service (`Service.qml`) owns sign-in, the entry list and the refresh
+timer, once for the whole shell: with the bar on several monitors there is still one
+fetch per interval, and marking an entry read on one screen takes it off every
+screen. It checks the stored sign-in when the shell starts, so the new-entry dot works
+before the panel has ever been opened. Under a third-party bar that provides no plugin
+services, the panel says so instead of listing entries.
+
 ## Remove
 
 ```sh

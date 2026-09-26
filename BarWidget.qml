@@ -7,9 +7,17 @@ BarWidget {
   moduleName: "anavarre.miniflux"
 
   readonly property bool opened: panelLoader.item ? panelLoader.item.opened === true : false
-  // The panel does the bookkeeping for what counts as new, since it owns the
+
+  // The plugin's Service.qml singleton, shared by every monitor's widget. The
+  // host reassigns its service map as each service registers, and this lookup
+  // reads through it, so the binding re-evaluates once the service exists.
+  // Null under a bar that hands out no service.
+  readonly property var service: root.bar && root.bar.shell
+    && typeof root.bar.shell.serviceFor === "function"
+    ? root.bar.shell.serviceFor(root.moduleName) : null
+  // The service does the bookkeeping for what counts as new, since it owns the
   // entry list; the widget only paints the dot.
-  readonly property bool hasNewEntries: panelLoader.item ? panelLoader.item.hasNewEntries === true : false
+  readonly property bool hasNewEntries: root.service ? root.service.hasNewEntries === true : false
   readonly property bool newEntryIndicator: root.setting("newEntryIndicator", true) === true
 
   readonly property bool popoutSwitchClosing: panelLoader.item ? panelLoader.item.popoutSwitchClosing === true : false
@@ -19,16 +27,23 @@ BarWidget {
   function toggle() { if (panelLoader.item) panelLoader.item.toggle() }
   function closeForPopoutSwitch() { if (panelLoader.item) panelLoader.item.closeForPopoutSwitch() }
 
-  // The shell injects settings into widgets, not panels, so they are handed
-  // down here — and again whenever the user changes one.
+  // The shell injects settings into widgets, not panels or services, so they
+  // are handed down here — and again whenever the user changes one. What the
+  // service fetches goes to the service; how the panel reads stays with it.
+  function injectService() {
+    if (!root.service) return
+    root.service.entryLimit = root.setting("entryLimit", 10)
+    root.service.unreadOnly = root.setting("unreadOnly", true) === true
+    root.service.refreshMinutes = root.setting("refreshMinutes", 30)
+  }
+
   function injectPanel() {
+    root.injectService()
     if (!panelLoader.item) return
     panelLoader.item.bar = root.bar
     panelLoader.item.anchorItem = button
     panelLoader.item.hostWidget = root
-    panelLoader.item.entryLimit = root.setting("entryLimit", 10)
-    panelLoader.item.unreadOnly = root.setting("unreadOnly", true) === true
-    panelLoader.item.refreshMinutes = root.setting("refreshMinutes", 30)
+    panelLoader.item.service = root.service
     panelLoader.item.textSize = root.setting("textSize", "medium")
     panelLoader.item.newEntryIndicator = root.newEntryIndicator
   }
@@ -53,6 +68,7 @@ BarWidget {
   implicitHeight: button.implicitHeight
   onBarChanged: injectPanel()
   onSettingsChanged: injectPanel()
+  onServiceChanged: injectPanel()
 
   Loader {
     id: panelLoader

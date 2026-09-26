@@ -7,9 +7,11 @@
   "license": "MIT",
   "description": "Read the latest unread items from a Miniflux instance and mark them read without leaving the bar.",
   "kinds": [
+    "service",
     "bar-widget"
   ],
   "entryPoints": {
+    "service": "Service.qml",
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {

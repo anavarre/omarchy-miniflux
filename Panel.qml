@@ -1,6 +1,5 @@
 import QtQuick
 import Quickshell
-import Quickshell.Io
 import qs.Commons
 import qs.Ui
 import "Model.js" as Model
@@ -13,28 +12,36 @@ Panel {
   property var anchorItem: null
   property var hostWidget: null
 
-  // Pushed in by the bar widget, which is the only side the shell injects
-  // user settings into.
-  property int entryLimit: 10
+  // The plugin's Service.qml singleton, handed down by the bar widget. It owns
+  // sign-in, the entry list and every request; this panel is one monitor's
+  // view of it. Until the service appears, or under a bar that hands out no
+  // service, the panel reads an inert stand-in so every binding still has
+  // something to read.
+  property var service: null
+  readonly property var miniflux: root.service || inertService
+
+  // Settings the service acts on. The Settings section writes them back
+  // through the service and the widget, which owns the shell.json entry.
+  readonly property int entryLimit: root.miniflux.entryLimit
   // 1 up to the API's own ceiling, so the list can be as short or as long as
   // the user wants it.
   readonly property int entryLimitMin: 1
   readonly property int entryLimitMax: 100
-  property bool unreadOnly: true
-  // Minutes between automatic refreshes. Injected from the stored setting and
-  // written back by the Settings section; always one of the allowed steps.
-  property int refreshMinutes: 30
+  readonly property bool unreadOnly: root.miniflux.unreadOnly
+  // Minutes between automatic refreshes; always one of the allowed steps.
+  readonly property int refreshMinutes: root.miniflux.refreshMinutes
   // 30 minutes up to a day, so the interval can never hammer the instance.
   readonly property var refreshChoices: [30, 60, 120, 180, 360, 720, 1440]
   readonly property int refreshMin: refreshChoices[0]
   readonly property int refreshMax: refreshChoices[refreshChoices.length - 1]
 
+  // Whether a refresh that brings in unseen entries lights up the bar icon.
+  // Pushed in by the bar widget, which paints the dot.
+  property bool newEntryIndicator: true
+
   // Text size is offered as named sizes rather than pixel values — the user
   // picks how big the panel reads, and every font size in it is scaled by the
   // matching factor.
-  // Whether a refresh that brings in unseen entries lights up the bar icon.
-  property bool newEntryIndicator: true
-
   property string textSize: "medium"
   readonly property var textSizes: [
     { value: "small", label: "Small", scale: 0.85 },
@@ -52,24 +59,24 @@ Panel {
   // of them together.
   function fs(size) { return Math.round(size * root.textScale) }
 
-  // "unknown" until the first check, then "checking" / "ok" / "error".
-  // Everything else is gated on "ok", so a credential problem is reported
-  // once, as sign-in, instead of once per request as an opaque 401.
-  property string authState: "unknown"
-  // A setup hint ("enter your username") is advice and reads as such; an
-  // error ("Miniflux rejected the stored credentials") is a failure and reads
-  // in the urgent color. Neither is cleared by starting another check, so the
-  // form stays put while the check it triggered is in flight.
-  property string authHint: ""
-  property string authError: ""
-  property string account: ""
-  readonly property bool authenticated: authState === "ok"
+  // Shared state, read straight off the service.
+  readonly property string authState: root.miniflux.authState
+  readonly property string authHint: root.miniflux.authHint
+  readonly property string authError: root.miniflux.authError
+  readonly property string account: root.miniflux.account
+  readonly property bool authenticated: root.miniflux.authenticated === true
+  readonly property bool saving: root.miniflux.saving === true
+  readonly property bool hasSecret: root.miniflux.hasSecret === true
+  readonly property bool loading: root.miniflux.loading === true
+  readonly property string errorText: root.miniflux.errorText
+  readonly property string saveNotice: root.miniflux.saveNotice
+  readonly property var entries: root.miniflux.entries
+  readonly property int total: root.miniflux.total
+  readonly property int listedUnread: root.miniflux.listedUnread
 
   // The sign-in form. It opens by itself when there is nothing stored or what
   // is stored no longer works, and on demand from "Account".
   property bool configuring: false
-  property bool saving: false
-  property bool hasSecret: false
   readonly property bool showSignIn: root.configuring || root.authState === "unknown"
     || (!root.authenticated && (root.authError !== "" || root.authHint !== ""))
   readonly property bool showSettings: root.settingsOpen && !root.showSignIn
@@ -96,54 +103,32 @@ Panel {
     { keys: "Esc", what: "Close" }
   ]
 
-  property bool loading: false
-  property string errorText: ""
-  // Transient confirmation for the save shortcut, shown under the header.
-  property string saveNotice: ""
-  property bool saveEntryBusy: false
-  property var entries: []
-  property int total: 0
+  // Local to this monitor: which row the keyboard is on.
   property int selected: -1
 
-  // Entries being marked read are dropped from the list as soon as the
-  // request goes out — the round trip is the slow part, and a row that lingers
-  // invites a second click on something already gone. A failure puts the whole
-  // list back by refetching.
-  property var pending: []
+  // The service counts open panels, so a background refresh only lights the
+  // bar dot while nobody is looking. This remembers which service object was
+  // told, so the matching close reaches the same one.
+  property var countedIn: null
 
-  // Set when a background refresh turns up entry ids that were not in the
-  // previous list. The bar widget reads it to paint its dot; opening the panel
-  // is what clears it, since by then you have seen them.
-  property bool hasNewEntries: false
-  // Ids from the last fetch, rebuilt each time so the map cannot grow without
-  // bound. Null until the first fetch lands — that one only sets the baseline,
-  // so signing in does not immediately claim everything is new.
-  property var seenIds: null
-
-  // Folds a freshly fetched list into the baseline and reports whether any of
-  // it was unseen.
-  function noteEntries(list) {
-    var seen = {}
-    var fresh = false
-    for (var i = 0; i < list.length; i++) {
-      seen[list[i].id] = true
-      if (root.seenIds !== null && !root.seenIds[list[i].id]) fresh = true
-    }
-    root.seenIds = seen
-    if (fresh && !root.opened) root.hasNewEntries = true
+  function trackOpen() {
+    if (root.countedIn) return
+    root.countedIn = root.miniflux
+    root.countedIn.panelOpened()
   }
 
-  function clearNewEntries() {
-    root.hasNewEntries = false
-    var seen = {}
-    for (var i = 0; i < root.entries.length; i++) seen[root.entries[i].id] = true
-    root.seenIds = seen
+  function trackClose() {
+    if (!root.countedIn) return
+    var counted = root.countedIn
+    root.countedIn = null
+    // The service may already be gone if the plugin was disabled while open.
+    try { counted.panelClosed() } catch (e) {}
   }
 
   function setNewEntryIndicator(on) {
     if (on === root.newEntryIndicator) return
     root.newEntryIndicator = on
-    if (!on) root.hasNewEntries = false
+    if (!on) root.miniflux.clearNewEntries()
     if (root.hostWidget && typeof root.hostWidget.saveNewEntryIndicator === "function")
       root.hostWidget.saveNewEntryIndicator(on)
   }
@@ -170,41 +155,35 @@ Panel {
     return false
   }
 
-  function loadConfig() {
-    configProcess.command = Model.configCommand()
-    configProcess.running = true
+  // Fills whichever sign-in fields are still empty from what is on file.
+  function prefillSignIn() {
+    if (serverField.text === "") serverField.text = root.miniflux.storedServer
+    if (userField.text === "") userField.text = root.miniflux.storedUsername
   }
 
   function openSignIn() {
     root.settingsOpen = false
     root.configuring = true
-    root.authError = ""
-    root.authHint = ""
-    root.loadConfig()
+    root.miniflux.clearAuthMessages()
+    root.prefillSignIn()
+    root.miniflux.loadConfig()
     Qt.callLater(function() { serverField.forceActiveFocus() })
   }
 
   function saveSignIn() {
     if (root.saving) return
-    root.saving = true
-    root.authError = ""
-    root.authHint = ""
-    saveProcess.payload = serverField.text.trim() + "\n" + userField.text.trim() + "\n" + passField.text + "\n"
-    saveProcess.command = Model.saveCommand()
-    saveProcess.running = true
+    root.miniflux.signIn(serverField.text, userField.text, passField.text)
   }
 
   function cancelSignIn() {
     if (!root.authenticated) { root.close(); return }
     root.configuring = false
     passField.text = ""
-    root.authError = ""
-    root.authHint = ""
+    root.miniflux.clearAuthMessages()
   }
 
   function forgetSignIn() {
-    forgetProcess.command = Model.forgetCommand()
-    forgetProcess.running = true
+    root.miniflux.forget()
   }
 
   // Snaps whatever comes in to the nearest allowed choice, so a stored value
@@ -218,7 +197,7 @@ Panel {
         n = root.refreshChoices[i]
     }
     if (n === root.refreshMinutes) return
-    root.refreshMinutes = n
+    root.miniflux.refreshMinutes = n
     if (root.hostWidget && typeof root.hostWidget.saveRefreshMinutes === "function")
       root.hostWidget.saveRefreshMinutes(n)
   }
@@ -230,10 +209,10 @@ Panel {
     if (!isFinite(n)) return
     n = Math.max(root.entryLimitMin, Math.min(root.entryLimitMax, n))
     if (n === root.entryLimit) return
-    root.entryLimit = n
+    root.miniflux.entryLimit = n
     if (root.hostWidget && typeof root.hostWidget.saveEntryLimit === "function")
       root.hostWidget.saveEntryLimit(n)
-    if (root.authenticated) root.refresh()
+    if (root.authenticated) root.miniflux.refresh()
   }
 
   // One at a time up to ten, then in tens — a short list is tuned precisely,
@@ -276,22 +255,7 @@ Panel {
     root.setTextSize(root.textSizes[i].value)
   }
 
-  function checkAuth() {
-    if (root.authState === "checking") return
-    root.authState = "checking"
-    authProcess.command = Model.authCommand()
-    authProcess.running = true
-  }
-
-  function refresh() {
-    if (!root.authenticated) { root.checkAuth(); return }
-    if (root.loading) return
-    root.loading = true
-    root.errorText = ""
-    entriesProcess.command = Model.entriesCommand(root.entryLimit, root.unreadOnly)
-    entriesProcess.running = true
-    autoRefresh.restart()
-  }
+  function refresh() { root.miniflux.refresh() }
 
   function openEntry(index) {
     if (index < 0 || index >= root.entries.length) return
@@ -304,62 +268,18 @@ Panel {
     root.close()
   }
 
-  // Marks a batch read and takes those rows out of the list straight away.
-  function markRead(ids) {
-    if (!root.authenticated || ids.length === 0) return
-    var gone = {}
-    for (var i = 0; i < ids.length; i++) gone[ids[i]] = true
-    var kept = []
-    for (var j = 0; j < root.entries.length; j++) {
-      if (!gone[root.entries[j].id]) kept.push(root.entries[j])
-    }
-    root.entries = kept
-    root.total = Math.max(0, root.total - ids.length)
-    root.selected = Math.min(root.selected, root.entries.length - 1)
-    root.pending = ids
-    markProcess.command = Model.markReadCommand(ids)
-    markProcess.running = true
-  }
+  function markRead(ids) { root.miniflux.markRead(ids) }
 
   function markSelectedRead() {
     if (root.selected < 0 || root.selected >= root.entries.length) return
     root.markRead([root.entries[root.selected].id])
   }
 
-  // Only what is loaded in the panel right now: the batch is built from the
-  // rows on screen, never from the instance's wider unread count, so entries
-  // beyond the list are left alone.
-  function markAllRead() {
-    var ids = []
-    for (var i = 0; i < root.entries.length; i++)
-      if (root.entries[i].unread) ids.push(root.entries[i].id)
-    root.markRead(ids)
-  }
+  function markAllRead() { root.miniflux.markAllRead() }
 
-  readonly property int listedUnread: {
-    var n = 0
-    for (var i = 0; i < root.entries.length; i++) if (root.entries[i].unread) n++
-    return n
-  }
-
-  // Hands the selected entry to the account's save integration. The entry
-  // stays in the list -- saving is not reading -- so the only feedback is the
-  // note under the header, which clears itself after a few seconds.
   function saveSelected() {
-    if (!root.authenticated) return
     if (root.selected < 0 || root.selected >= root.entries.length) return
-    if (root.saveEntryBusy) return
-    root.saveEntryBusy = true
-    root.saveNotice = ""
-    saveEntryProcess.command = Model.saveEntryCommand(root.entries[root.selected].id)
-    saveEntryProcess.running = true
-  }
-
-  // A notice that asks for action stays up long enough to be read and acted on.
-  function noteSaved(message, ms) {
-    root.saveNotice = message
-    saveNoticeTimer.interval = ms || 4000
-    saveNoticeTimer.restart()
+    root.miniflux.saveEntry(root.entries[root.selected].id)
   }
 
   function moveSelection(delta) {
@@ -373,207 +293,85 @@ Panel {
 
   // The first open has nothing stored yet, so it lands on the sign-in form;
   // every later open refetches, because a feed list read an hour ago is stale.
+  // The service already holds the last list, so that shows while it fetches.
   onOpenedChanged: {
-    if (!opened) return
-    root.clearNewEntries()
+    if (!opened) { root.trackClose(); return }
+    root.trackOpen()
     root.selected = -1
     root.settingsOpen = false
-    if (root.authenticated) root.refresh()
-    else if (!root.configuring) root.checkAuth()
+    if (root.authenticated) root.miniflux.refresh()
+    else if (!root.configuring) root.miniflux.checkAuth()
     if (root.showSignIn) Qt.callLater(function() { serverField.forceActiveFocus() })
   }
 
-  // Keeps the list current in the background, so an open shows fresh entries
-  // rather than starting a fetch you wait on. A manual refresh restarts it.
-  Timer {
-    id: autoRefresh
-    interval: Math.max(root.refreshMin, root.refreshMinutes) * 60000
-    repeat: true
-    running: root.authenticated
-    onTriggered: root.refresh()
+  onShowSignInChanged: {
+    if (!root.opened || !root.showSignIn) return
+    root.prefillSignIn()
+    Qt.callLater(function() { serverField.forceActiveFocus() })
   }
 
-  Timer {
-    id: saveNoticeTimer
-    interval: 4000
-    onTriggered: root.saveNotice = ""
-  }
+  Component.onDestruction: root.trackClose()
 
-  Process {
-    id: saveEntryProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: saveEntryStdout; waitForEnd: true }
-    stderr: StdioCollector { id: saveEntryStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.saveEntryBusy = false
-      var response = Model.splitResponse(saveEntryStdout.text)
-      if (exitCode === 0 && (response.status === 202 || response.status === 200 || response.status === 204)) {
-        root.noteSaved("Saved.")
-        return
-      }
-      root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
-    }
-  }
-
-  Process {
-    id: configProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: configStdout; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (exitCode !== 0) return
-      try {
-        var config = Model.parseConfig(configStdout.text)
-        if (serverField.text === "") serverField.text = config.server
-        if (userField.text === "") userField.text = config.username
-        root.hasSecret = config.hasSecret
-      } catch (e) {
-        // Nothing stored yet — the empty form is the right thing to show.
-      }
-    }
-  }
-
-  Process {
-    id: saveProcess
-    property string payload: ""
-    running: false
-    command: []
-    stdinEnabled: true
-    stdout: StdioCollector { id: saveStdout; waitForEnd: true }
-    stderr: StdioCollector { id: saveStderr; waitForEnd: true }
-    onStarted: {
-      write(payload)
-      payload = ""
-      stdinEnabled = false
-    }
-    onExited: function(exitCode) {
-      root.saving = false
-      if (exitCode !== 0) {
-        root.authState = "error"
-        root.authHint = ""
-        root.authError = Model.saveMessage(saveStderr.text, exitCode)
-        return
-      }
+  Connections {
+    target: root.miniflux
+    ignoreUnknownSignals: true
+    function onSignedIn() {
       passField.text = ""
-      root.hasSecret = true
-      var warning = Model.saveWarning(saveStdout.text)
-      if (warning !== "") root.noteSaved(warning, 15000)
       root.configuring = false
-      root.authState = "unknown"
-      root.checkAuth()
     }
-  }
-
-  Process {
-    id: forgetProcess
-    running: false
-    command: []
-    onExited: {
-      root.hasSecret = false
-      root.entries = []
-      root.seenIds = null
-      root.hasNewEntries = false
-      root.total = 0
-      root.account = ""
+    function onForgotten() {
+      passField.text = ""
       root.configuring = true
-      root.authState = "unknown"
-      root.authError = ""
-      root.authHint = "Credentials removed."
-      passField.text = ""
-      Qt.callLater(function() { serverField.forceActiveFocus() })
+      if (root.opened) Qt.callLater(function() { serverField.forceActiveFocus() })
+    }
+    function onAuthenticatedChanged() {
+      if (root.miniflux.authenticated) root.configuring = false
+    }
+    function onStoredServerChanged() { root.prefillSignIn() }
+    function onStoredUsernameChanged() { root.prefillSignIn() }
+    // A refresh or a mark on another monitor can shorten the list under this
+    // one's selection.
+    function onEntriesChanged() {
+      root.selected = Math.min(root.selected, root.miniflux.entries.length - 1)
     }
   }
 
-  Process {
-    id: authProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: authStdout; waitForEnd: true }
-    stderr: StdioCollector { id: authStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      if (Model.needsSetup(exitCode)) {
-        root.authState = "error"
-        root.authError = ""
-        root.authHint = Model.setupMessage(exitCode)
-        root.loadConfig()
-        Qt.callLater(function() { serverField.forceActiveFocus() })
-        return
-      }
-      var response = Model.splitResponse(authStdout.text)
-      if (exitCode !== 0 || response.status !== 200) {
-        root.authState = "error"
-        root.authHint = ""
-        root.authError = Model.errorMessage(authStderr.text, exitCode, response.status)
-        root.loadConfig()
-        return
-      }
-      try {
-        root.account = Model.parseMe(response.body).username
-      } catch (e) {
-        root.account = ""
-      }
-      root.authState = "ok"
-      root.authError = ""
-      root.authHint = ""
-      root.configuring = false
-      root.refresh()
-    }
-  }
-
-  Process {
-    id: entriesProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: entriesStdout; waitForEnd: true }
-    stderr: StdioCollector { id: entriesStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      root.loading = false
-      var response = Model.splitResponse(entriesStdout.text)
-      if (response.status === 401 || response.status === 403) {
-        root.authState = "error"
-        root.authHint = ""
-        root.authError = Model.errorMessage(entriesStderr.text, exitCode, response.status)
-        return
-      }
-      if (exitCode !== 0 || response.status !== 200) {
-        root.errorText = Model.errorMessage(entriesStderr.text, exitCode, response.status)
-        return
-      }
-      try {
-        root.entries = Model.parseEntries(response.body)
-        root.noteEntries(root.entries)
-        root.total = Model.totalEntries(response.body)
-        root.errorText = ""
-        root.selected = -1
-      } catch (e) {
-        root.errorText = "Could not read the Miniflux response."
-      }
-    }
-  }
-
-  Process {
-    id: markProcess
-    running: false
-    command: []
-    stdout: StdioCollector { id: markStdout; waitForEnd: true }
-    stderr: StdioCollector { id: markStderr; waitForEnd: true }
-    onExited: function(exitCode) {
-      var response = Model.splitResponse(markStdout.text)
-      var ok = exitCode === 0 && (response.status === 204 || response.status === 200)
-      root.pending = []
-      if (ok) {
-        // Marking the list read can empty it while the instance still holds
-        // unread entries the limit kept out. Pulling the next batch straight
-        // away shows them without waiting for a manual "r".
-        if (root.entries.length === 0 && root.total > 0) root.refresh()
-        return
-      }
-      // The rows were taken out on the assumption this would work; refetching
-      // is the honest way to put back whatever is actually still unread.
-      root.errorText = Model.errorMessage(markStderr.text, exitCode, response.status)
-      root.refresh()
-    }
+  // Stands in for the service until it exists. Everything is idle and every
+  // action is a no-op; the list section says why nothing is there.
+  QtObject {
+    id: inertService
+    property int entryLimit: 10
+    property bool unreadOnly: true
+    property int refreshMinutes: 30
+    property string authState: "unavailable"
+    property string authHint: ""
+    property string authError: ""
+    property string account: ""
+    readonly property bool authenticated: false
+    property bool saving: false
+    property bool hasSecret: false
+    property string storedServer: ""
+    property string storedUsername: ""
+    property bool loading: false
+    property string errorText: "The Miniflux service is not running. Re-enable the plugin; under a third-party bar, switch back to Omarchy's own bar."
+    property string saveNotice: ""
+    property var entries: []
+    property int total: 0
+    readonly property int listedUnread: 0
+    signal signedIn()
+    signal forgotten()
+    function panelOpened() {}
+    function panelClosed() {}
+    function clearNewEntries() {}
+    function clearAuthMessages() {}
+    function loadConfig() {}
+    function signIn(server, username, password) {}
+    function forget() {}
+    function checkAuth() {}
+    function refresh() {}
+    function markRead(ids) {}
+    function markAllRead() {}
+    function saveEntry(id) {}
   }
 
   KeyboardPanel {
