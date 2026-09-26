@@ -18,11 +18,15 @@ omarchy bar move anavarre.miniflux --section right
 
 Requires `curl` and `bash`, both of which Omarchy already has.
 
-Requests run `/usr/bin/bash` with `PATH` fixed to `/usr/bin:/bin` and a scrubbed
+Every request goes through `bin/miniflux-api`, one script with a subcommand per
+request (`auth`, `entries`, `mark`, `save-entry`, `config`, `save`, `forget`); the
+panel only passes it arguments, never shell code. It runs `/usr/bin/bash` on the script with `PATH` fixed to `/usr/bin:/bin` and a scrubbed
 environment: only `HOME`, `XDG_CONFIG_HOME`, the `MINIFLUX_*` variables below, the
 proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case forms)
 and the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`) are passed
-through. `~/.curlrc` is ignored.
+through. `~/.curlrc` is ignored. To debug a sign-in, run it yourself:
+`bin/miniflux-api auth` prints the `/v1/me` answer and its HTTP status, or exits with
+one of the codes listed at the top of the script.
 
 ## Usage
 

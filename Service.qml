@@ -18,6 +18,9 @@ Item {
   property var shell: null
   property var manifest: null
 
+  // The request script that ships next to this file (see bin/miniflux-api).
+  readonly property string api: Model.localPath(Qt.resolvedUrl("bin/miniflux-api"))
+
   // Pushed in by the bar widget, which is the only side the shell injects user
   // settings into. Every monitor's widget reads the same shell.json entry, so
   // whichever pushes last pushes the same values.
@@ -139,7 +142,7 @@ Item {
   function loadConfig() {
     if (configProcess.running) return
     configProcess.session = root.session
-    configProcess.command = Model.configCommand()
+    configProcess.command = Model.configCommand(root.api)
     configProcess.running = true
   }
 
@@ -156,14 +159,14 @@ Item {
     root.saving = true
     root.clearAuthMessages()
     saveProcess.payload = String(server).trim() + "\n" + String(username).trim() + "\n" + String(password) + "\n"
-    saveProcess.command = Model.saveCommand()
+    saveProcess.command = Model.saveCommand(root.api)
     saveProcess.running = true
   }
 
   function forget() {
     if (root.saving || forgetProcess.running) return
     root.newSession()
-    forgetProcess.command = Model.forgetCommand()
+    forgetProcess.command = Model.forgetCommand(root.api)
     forgetProcess.running = true
   }
 
@@ -171,7 +174,7 @@ Item {
     root.authState = "checking"
     if (authProcess.running) { root.authRecheck = true; return }
     authProcess.session = root.session
-    authProcess.command = Model.authCommand()
+    authProcess.command = Model.authCommand(root.api)
     authProcess.running = true
   }
 
@@ -182,7 +185,7 @@ Item {
     root.loading = true
     root.errorText = ""
     entriesProcess.generation = root.listGeneration
-    entriesProcess.command = Model.entriesCommand(root.entryLimit, root.unreadOnly)
+    entriesProcess.command = Model.entriesCommand(root.api, root.entryLimit, root.unreadOnly)
     entriesProcess.running = true
     autoRefresh.restart()
   }
@@ -228,7 +231,7 @@ Item {
     root.markQueue = []
     markProcess.session = root.session
     markProcess.ids = ids
-    markProcess.command = Model.markReadCommand(ids)
+    markProcess.command = Model.markReadCommand(root.api, ids)
     markProcess.running = true
   }
 
@@ -250,7 +253,7 @@ Item {
     root.saveEntryBusy = true
     root.saveNotice = ""
     saveEntryProcess.session = root.session
-    saveEntryProcess.command = Model.saveEntryCommand(id)
+    saveEntryProcess.command = Model.saveEntryCommand(root.api, id)
     saveEntryProcess.running = true
   }
 

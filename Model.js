@@ -1,28 +1,21 @@
 .pragma library
 
-// Miniflux REST API: https://miniflux.app/docs/api.html
+// Every request is a subcommand of bin/miniflux-api, which holds the shell
+// side: where credentials live, how curl is called, the size cap and the exit
+// codes (10-13 setup, 20 request failed, 21 credentials rejected, 22 response
+// too large, 23 API key could not be minted, 24 unsafe store, 64 bad
+// arguments). The builders below only assemble argument arrays, so no value
+// from QML is ever parsed as shell code.
 //
-// Credentials are resolved in the shell, never held in QML. The server and
-// username live in a plain config file; the secret is either an API key
-// minted at setup (X-Auth-Token, the API's preferred mechanism) or, when the
-// instance is too old to mint one, the password kept for HTTP basic auth.
-// curl reads the header or `user =` from a config file on stdin (-K -), so the
-// secret never appears in argv or in `ps`.
-//
-// Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
-// http:// off this machine, 20 request failed, 21 credentials rejected,
-// 22 response too large, 23 API key could not be minted, 24 the credential
-// store is unsafe or could not be written.
-//
-// Every command runs /usr/bin/bash with a scrubbed environment (see
-// environment below) and PATH pinned to the system directories, so curl, sed
-// and the rest are always the distribution's binaries. Nothing inherited from
-// the shell's session can steer them: BASH_ENV would be sourced before the
-// script, an exported function could stand in for curl, and CURL_HOME or a
-// user PATH entry could swap in a different config or binary. PATH is set in
-// the script too, in case a host ignores clearEnvironment.
+// The script is run by /usr/bin/bash with a scrubbed environment (see
+// environment below) rather than executed directly, so it works without the
+// executable bit and no bash found on the session's PATH can stand in.
+// Nothing inherited from the shell's session can steer it: BASH_ENV would be
+// sourced before the script, an exported function could stand in for curl,
+// and CURL_HOME or a user PATH entry could swap in a different config or
+// binary. The script pins PATH itself too, in case a host ignores
+// clearEnvironment.
 var bash = "/usr/bin/bash"
-var baseline = 'set -u\nPATH=/usr/bin:/bin; export PATH'
 
 // The only variables a command sees. null means "pass through the value from
 // the shell's environment, if it has one" (Quickshell's clearEnvironment
@@ -50,168 +43,53 @@ var environment = {
   CURL_CA_BUNDLE: null
 }
 
-// The store is $MINIFLUX_PLUGIN_DIR, else omarchy/miniflux under
-// $XDG_CONFIG_HOME (which the XDG spec says to ignore unless absolute), else
-// under ~/.config. A store that is a symlink, not a directory, or owned by
-// someone else is refused outright: reading it could hand another user's
-// server our requests, and writing through it could put the API key wherever
-// the link points.
-var storeFn = [
-  'cfg="${XDG_CONFIG_HOME:-}"; case "$cfg" in /*) ;; *) cfg="$HOME/.config" ;; esac',
-  'store="${MINIFLUX_PLUGIN_DIR:-$cfg/omarchy/miniflux}"',
-  'unsafe() { [ -L "$store" ] || { [ -e "$store" ] && { [ ! -d "$store" ] || [ ! -O "$store" ]; }; }; }',
-  'unsafe && { printf \'Refusing the credential store %s: it must be a directory you own, not a symlink.\\n\' "$store" >&2; exit 24; }'
-].join("\n")
-
-// Each file is written to a temporary name inside the store and renamed into
-// place, so a crash or a full disk leaves the old file whole rather than a
-// truncated secret, and rename replaces a planted symlink instead of
-// following it. mktemp creates the file 0600 before anything is written.
-var putFn = [
-  'put() {',
-  '  local t',
-  '  t=$(mktemp "$store/.$1.XXXXXX") || exit 24',
-  '  if printf \'%s\' "$2" > "$t" && chmod 600 "$t" && mv -f "$t" "$store/$1"; then return 0; fi',
-  '  rm -f "$t"; printf \'Could not write %s.\\n\' "$store/$1" >&2; exit 24',
-  '}'
-].join("\n")
-
-// A curl config that writes the HTTP status on its own last line, so the
-// caller can tell 200 from 401 without a second request.
-var statusLine = 'write-out = "\\\\n%%{http_code}"\\n'
-
-// Basic auth and X-Auth-Token are both cleartext on the wire, so a plain
-// http:// server is refused unless it is loopback, where nothing leaves the
-// machine. The host is cut out of the URL (dropping any userinfo, so
-// http://localhost@evil.example is not mistaken for localhost) and matched
-// exactly. curl is never told to follow redirects, and fetch() below pins the
-// protocol and ignores ~/.curlrc, so an https:// server cannot bounce a request
-// (and the X-Auth-Token header curl would carry along) down to http:// either.
-var plainFn = [
-  'plain() {',
-  '  case "$1" in http://*) ;; *) return 1 ;; esac',
-  '  h=${1#http://}; h=${h%%/*}; h=${h%%\\?*}; h=${h%%#*}; h=${h##*@}',
-  '  case "$h" in "[::1]"|"[::1]:"*) return 1 ;; esac',
-  '  h=${h%:*}',
-  '  case "$h" in',
-  '    localhost) return 1 ;;',
-  '    127.*) case "$h" in *[!0-9.]*) return 0 ;; esac; return 1 ;;',
-  '  esac',
-  '  return 0',
-  '}'
-].join("\n")
-
-// Every request gets a connect timeout, a total deadline and a size cap, so a
-// slow or oversized answer cannot hold a request open or balloon the stdout the
-// panel collects. --max-filesize stops early when the server announces a size;
-// head -c is the backstop for a body that doesn't, reading one byte past the cap
-// so an overrun can be told apart from a body that merely fills it. The HTTP
-// status line from write-out counts toward the cap, which is generous enough
-// (100 entries with full content) not to matter.
-//
-// -q must come first: it stops curl reading ~/.curlrc, which could otherwise
-// switch on `location` or `insecure` and undo all of the above. --proto pins
-// the one scheme the server was accepted with, and --proto-redir keeps any
-// redirect on https:// should one ever be followed.
-var maxBytes = 16 * 1024 * 1024
-var fetchFn = [
-  'cap=' + maxBytes,
-  'fetch() {',
-  '  local LC_ALL=C out rc=0 proto==https',
-  '  case "$server" in http://*) proto==http ;; esac',
-  '  out=$(curl -q --proto "$proto" --proto-redir =https --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?',
-  '  if [ "$rc" -eq 63 ] || [ "${#out}" -gt "$cap" ]; then',
-  '    printf \'Miniflux sent more than %s MiB.\\n\' $((cap / 1048576)) >&2; return 22',
-  '  fi',
-  '  [ "$rc" -eq 0 ] || return 20',
-  '  printf \'%s\\n\' "$out"',
-  '}'
-].join("\n")
-
-// curl's -K parser reads `name = "value"` with backslash escapes, so a secret
-// carrying a quote or a backslash has to be escaped or it truncates the line.
-// Every value is read one line at a time or has CR/LF stripped (oneLine), so
-// no newline can reach this to start a new directive; this is about passwords
-// that are merely awkward, not hostile.
-var oneLineFn = 'oneLine() { printf \'%s\' "$1" | tr -d "\\r\\n"; }'
-var escFn = 'esc() { printf \'%s\' "$1" | sed \'s|\\\\|\\\\\\\\|g; s|"|\\\\"|g\'; }'
-
-var prelude = [
-  baseline,
-  storeFn,
-  'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
-  'secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\\r\\n"; }',
-  'server="${MINIFLUX_SERVER:-}"',
-  '[ -n "$server" ] || server=$(saved server)',
-  oneLineFn,
-  'username=$(oneLine "${MINIFLUX_USERNAME:-}")',
-  '[ -n "$username" ] || username=$(saved username)',
-  'token=$(oneLine "${MINIFLUX_API_KEY:-}")',
-  '[ -n "$token" ] || token=$(secret "$store/token")',
-  'password=$(oneLine "${MINIFLUX_PASSWORD:-}")',
-  '[ -n "$password" ] || password=$(secret "$store/password")',
-  'case "$server" in http://*|https://*) ;; "") ;; *) server="https://$server" ;; esac',
-  'server="${server%/}"',
-  '[ -n "$server" ] || exit 10',
-  plainFn,
-  'plain "$server" && exit 13',
-  '[ -n "$token" ] || [ -n "$username" ] || exit 11',
-  '[ -n "$token" ] || [ -n "$password" ] || exit 12',
-  escFn,
-  fetchFn,
-  'auth() {',
-  '  if [ -n "$token" ]; then printf \'header = "X-Auth-Token: %s"\\n\' "$(esc "$token")"',
-  '  else printf \'user = "%s:%s"\\n\' "$(esc "$username")" "$(esc "$password")"; fi',
-  '}',
-  'api() {',
-  '  path="$1"; shift',
-  '  { auth; printf \'silent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\'; } |',
-  '    fetch "$@" "$server$path" || exit $?',
-  '}'
-].join("\n")
+// The script's filesystem path, from the file:// URL Qt.resolvedUrl gives.
+// Anything else comes back empty, and bash then fails the request with "No
+// such file" instead of running something unexpected.
+function localPath(url) {
+  var s = String(url || "")
+  if (s.indexOf("file://") !== 0) return ""
+  try {
+    return decodeURIComponent(s.slice("file://".length))
+  } catch (e) {
+    return ""
+  }
+}
 
 function text(value) {
   return value === undefined || value === null ? "" : String(value)
 }
 
 // "are these credentials good" — GET /v1/me.
-function authCommand() {
-  return [bash, "-c", prelude + '\napi /v1/me']
+function authCommand(script) {
+  return [bash, script, "auth"]
 }
 
 // The latest entries, newest published first. Unread only by default; the
 // setting that turns that off asks for every status so a quiet list still has
 // something to show.
-function entriesCommand(limit, unreadOnly) {
+function entriesCommand(script, limit, unreadOnly) {
   var n = Number(limit)
   if (!isFinite(n) || n < 1) n = 10
   n = Math.min(100, Math.round(n))
-  var query = "/v1/entries?order=published_at&direction=desc&limit=" + n
-  if (unreadOnly) query += "&status=unread"
-  return [bash, "-c", prelude + '\napi "$1"', "miniflux", query]
+  return [bash, script, "entries", String(n), unreadOnly ? "unread" : "all"]
 }
 
-// PUT /v1/entries marks a batch in one request. Entry ids are not secret, so
-// the body can ride in argv.
-function markReadCommand(ids) {
-  var list = []
+// Marks a batch read in one request. Entry ids are not secret, so they can
+// ride in argv; anything that is not a positive whole number is dropped.
+function markReadCommand(script, ids) {
+  var cmd = [bash, script, "mark"]
   for (var i = 0; i < ids.length; i++) {
-    var n = Number(ids[i])
-    if (isFinite(n)) list.push(Math.round(n))
+    var n = Math.round(Number(ids[i]))
+    if (isFinite(n) && n > 0) cmd.push(String(n))
   }
-  var body = '{"entry_ids":[' + list.join(",") + '],"status":"read"}'
-  return [bash, "-c",
-    prelude + '\napi /v1/entries -X PUT -H "Content-Type: application/json" --data-binary "$1"',
-    "miniflux", body]
+  return cmd
 }
 
-// POST /v1/entries/{id}/save hands the entry to whatever third-party save
-// service the Miniflux account has configured -- the same thing "s" does in
-// the web UI. The id is a number we round ourselves, so it is safe in the URL.
-function saveEntryCommand(id) {
-  var n = Math.round(Number(id))
-  if (!isFinite(n)) return []
-  return [bash, "-c", prelude + '\napi "$1" -X POST', "miniflux", "/v1/entries/" + n + "/save"]
+// Hands an entry to whatever third-party save service the Miniflux account
+// has configured -- the same thing "s" does in the web UI.
+function saveEntryCommand(script, id) {
+  return [bash, script, "save-entry", String(Math.round(Number(id)))]
 }
 
 // Why a save didn't go through. 403 is the one worth naming: Miniflux answers
@@ -222,98 +100,21 @@ function saveEntryMessage(stderr, exitCode, status) {
   return errorMessage(stderr, exitCode, status)
 }
 
-// What the settings form should show: the resolved server and username, and
-// whether a secret is on file. The secret itself is never printed.
-function configCommand() {
-  return [bash, "-c", [
-    baseline,
-    storeFn,
-    'saved() { [ -r "$store/config" ] && sed -n "s|^$1=||p" "$store/config" | head -n1; }',
-    'server="${MINIFLUX_SERVER:-}"; [ -n "$server" ] || server=$(saved server)',
-    'username="${MINIFLUX_USERNAME:-}"; [ -n "$username" ] || username=$(saved username)',
-    'has=false',
-    'if [ -n "${MINIFLUX_API_KEY:-}" ] || [ -s "$store/token" ] || [ -s "$store/password" ]; then has=true; fi',
-    escFn,
-    'printf \'{"server":"%s","username":"%s","hasSecret":%s}\\n\' "$(esc "$server")" "$(esc "$username")" "$has"'
-  ].join("\n")]
+// The resolved server and username, and whether a secret is on file, as JSON.
+function configCommand(script) {
+  return [bash, script, "config"]
 }
 
-// Writes what the login form collected. Values arrive on stdin, one per line,
-// so the password never appears in argv. The login is verified before anything
-// is stored, and an API key is minted from it when the instance supports one
-// (Miniflux 2.2.9+) so the password does not have to be kept at all.
-//
-// The password is kept only when the instance has no key endpoint (404/405).
-// Any other mint failure stops before the store is touched, rather than
-// quietly downgrading to a stored password. Miniflux requires key descriptions
-// to be unique per user, so each one carries the machine name and the time.
-//
-// The minted key's id is kept in token-id so the key it replaces can be
-// revoked. That happens last, only once the new token is on disk, and failing
-// to revoke never fails the save: a leftover key is cheaper than no working
-// one. Keys are never matched by description, which two machines can share.
-// A revoke the server refuses is reported on stdout as `revoke-failed <id>`
-// (see saveWarning) so the leftover key can be deleted by hand; 404 means it
-// is already gone. The shell's PID keeps two saves in one second apart.
-function saveCommand() {
-  return [bash, "-c", [
-    baseline,
-    'umask 077',
-    storeFn,
-    'IFS= read -r server || true',
-    'IFS= read -r username || true',
-    'IFS= read -r password || true',
-    'case "$server" in http://*|https://*) ;; *) server="https://$server" ;; esac',
-    'server="${server%/}"',
-    '[ -n "$server" ] || exit 10',
-    plainFn,
-    'plain "$server" && exit 13',
-    '[ -n "$username" ] || exit 11',
-    '[ -n "$password" ] || exit 12',
-    escFn,
-    fetchFn,
-    'auth() { printf \'user = "%s:%s"\\nsilent\\nshow-error\\nheader = "Accept: application/json"\\n' + statusLine + '\' "$(esc "$username")" "$(esc "$password")"; }',
-    'me=$(auth | fetch "$server/v1/me") || exit $?',
-    'code=$(printf \'%s\' "$me" | tail -n1)',
-    '[ "$code" = "200" ] || { printf \'%s\\n\' "$code" >&2; exit 21; }',
-    'desc="Omarchy bar widget ($(uname -n | tr -cd "A-Za-z0-9.-") $(date -u +%Y-%m-%dT%H:%M:%SZ) $$)"',
-    'key=$(auth | fetch -X POST -H "Content-Type: application/json" --data-binary "{\\"description\\":\\"$desc\\"}" "$server/v1/api-keys") || exit $?',
-    'kcode=$(printf \'%s\' "$key" | tail -n1)',
-    'tok=""; kid=""',
-    'case "$kcode" in',
-    '  201) tok=$(printf \'%s\' "$key" | sed -n \'s/.*"token"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\' | head -n1)',
-    '       kid=$(printf \'%s\' "$key" | sed -n \'s/.*"id"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p\' | head -n1)',
-    '       [ -n "$tok" ] || { printf \'%s\\n\' "$kcode" >&2; exit 23; } ;;',
-    '  404|405) ;;',
-    '  *) printf \'%s\\n\' "$kcode" >&2; exit 23 ;;',
-    'esac',
-    'old=""; [ -r "$store/token-id" ] && old=$(head -n1 "$store/token-id" | tr -cd "0-9")',
-    'oldserver=""; [ -r "$store/config" ] && oldserver=$(sed -n "s/^server=//p" "$store/config" | head -n1)',
-    'mkdir -p "$store" && chmod 700 "$store" || { printf \'Could not create %s.\\n\' "$store" >&2; exit 24; }',
-    'unsafe && exit 24',
-    putFn,
-    'put config "server=$server"$\'\\n\'"username=$username"$\'\\n\'',
-    'if [ -n "$tok" ]; then',
-    '  put token "$tok"; rm -f "$store/password"',
-    '  if [ -n "$kid" ]; then put token-id "$kid"; else rm -f "$store/token-id"; fi',
-    '  if [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then',
-    '    rv=$(auth | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""',
-    '    case "$(printf \'%s\' "$rv" | tail -n1)" in 204|404) ;; *) printf \'revoke-failed %s\\n\' "$old" ;; esac',
-    '  fi',
-    'else',
-    '  put password "$password"; rm -f "$store/token" "$store/token-id"',
-    'fi'
-  ].join("\n")]
+// Verifies and stores what the login form collected. The values go on stdin,
+// one per line, so the password never appears in argv; a revoke the server
+// refused comes back on stdout (see saveWarning).
+function saveCommand(script) {
+  return [bash, script, "save"]
 }
 
-// Drops everything this plugin stored. Credentials from the environment are
-// not ours to remove.
-function forgetCommand() {
-  return [bash, "-c", [
-    baseline,
-    storeFn,
-    'rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"'
-  ].join("\n")]
+// Drops everything this plugin stored.
+function forgetCommand(script) {
+  return [bash, script, "forget"]
 }
 
 // Every response comes back as the body with the HTTP status on its own last
