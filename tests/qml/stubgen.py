@@ -26,7 +26,7 @@ DEFAULTS = {"bool": "false", "int": "0", "real": "0", "double": "0",
 
 BASES = {  # upstream root type -> stub root type
     "Item": "Item", "Rectangle": "Rectangle", "QtObject": "QtObject", "BorderSurface": "BorderSurface",
-    "PanelWindow": "Item", "TextField": "T.TextField",
+    "PanelWindow": "Item", "TextField": "T.TextField", "ToolTip": "T.ToolTip",
 }
 
 DECL = re.compile(r"^(?:(?:readonly|required|default)\s+)*property\s+(\S+)\s+(\w+)")
@@ -128,7 +128,7 @@ def stub(module, name):
 def main():
     sets = {
         ("Ui", "qs/Ui"): ["BarWidget", "BorderSurface", "Button", "KeyboardPanel", "Panel",
-                          "PanelActionButton", "PanelController", "PanelKeyCatcher",
+                          "PanelActionButton", "PanelController", "PanelKeyCatcher", "PanelToolTip",
                           "TextField", "ToggleSwitch", "WidgetButton"],
         ("Commons", "qs/Commons"): ["Color", "Style"],
     }

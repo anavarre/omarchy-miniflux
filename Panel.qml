@@ -684,6 +684,7 @@ Panel {
                       }
 
                       Text {
+                        id: titleText
                         width: parent.width
                         // Feed text, so never AutoText: rich text would let a
                         // title pull a remote <img> when the panel opens.
@@ -696,6 +697,23 @@ Panel {
                         wrapMode: Text.WordWrap
                         maximumLineCount: 2
                         elide: Text.ElideRight
+
+                        // Only a cut-off title needs one. PanelToolTip never
+                        // wraps, so cap it at the title's width and wrap it
+                        // here, or a long title runs off the panel.
+                        PanelToolTip {
+                          id: titleTip
+                          visible: titleHover.hovered && titleText.truncated
+                          text: titleText.text
+                          fontFamily: root.fontFamily
+                          width: Math.min(implicitWidth, titleText.width)
+
+                          Binding {
+                            target: titleTip.contentItem
+                            property: "wrapMode"
+                            value: Text.WordWrap
+                          }
+                        }
                       }
 
                       Text {
