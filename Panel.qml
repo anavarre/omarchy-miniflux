@@ -310,7 +310,8 @@ Panel {
       return
     }
     root.trackOpen()
-    root.selected = -1
+    root.selected = root.entries.length > 0 ? 0 : -1
+    listView.contentY = 0
     root.settingsOpen = false
     if (root.authenticated) root.miniflux.refresh()
     else if (!root.configuring) root.miniflux.checkAuth()
@@ -343,9 +344,15 @@ Panel {
     function onStoredServerChanged() { root.prefillSignIn() }
     function onStoredUsernameChanged() { root.prefillSignIn() }
     // A refresh or a mark on another monitor can shorten the list under this
-    // one's selection.
+    // one's selection. A list that arrives with nothing selected, on the
+    // first fetch or after the last one was read away, starts at its top.
     function onEntriesChanged() {
-      root.selected = Math.min(root.selected, root.miniflux.entries.length - 1)
+      var n = root.miniflux.entries.length
+      root.selected = Math.min(root.selected, n - 1)
+      if (root.selected < 0 && n > 0) {
+        root.selected = 0
+        listView.contentY = 0
+      }
     }
   }
 
