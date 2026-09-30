@@ -7,9 +7,11 @@
 #
 # A missing shellcheck, qmllint or PySide6 is skipped locally but fails under
 # CI (when CI is set), so a CI run cannot pass without every check. QMLLINT
-# names a qmllint to use; otherwise qmllint, then pyside6-qmllint, is looked
-# up on PATH. QMLTEST_PYTHON names a python with PySide6 for the service
-# tests; otherwise python3 is used if it has it.
+# names a qmllint to use; otherwise the first Qt 6 one of qmllint,
+# /usr/lib/qt6/bin/qmllint and pyside6-qmllint is used. QMLTEST_PYTHON names
+# a python with PySide6 for the service tests; otherwise the first of python3
+# and /usr/bin/python3 that has it is used, since a python3 from a version
+# manager such as mise shadows the system one PySide6 is packaged for.
 
 set -u
 cd "$(dirname "$0")/.." || exit 1
@@ -30,11 +32,17 @@ step "bin/miniflux-api"
 bash tests/api.sh || fail api
 
 step "Service.qml"
-qmltest_python="${QMLTEST_PYTHON:-python3}"
-if "$qmltest_python" -c 'import PySide6.QtQuickTest' 2> /dev/null; then
+qmltest_python=""
+for candidate in ${QMLTEST_PYTHON:-python3 /usr/bin/python3}; do
+  if "$candidate" -c 'import PySide6.QtQuickTest' 2> /dev/null; then
+    qmltest_python=$candidate
+    break
+  fi
+done
+if [ -n "$qmltest_python" ]; then
   "$qmltest_python" tests/qml/service/run.py || fail service
 else
-  missing service "PySide6 (for $qmltest_python)"
+  missing service "PySide6 (for ${QMLTEST_PYTHON:-python3 or /usr/bin/python3})"
 fi
 
 step "shellcheck"
@@ -49,15 +57,32 @@ fi
 # off: unused-imports, because the Quickshell stub is empty while the real
 # module is not. Any other warning, a missing property or an unqualified
 # access above all, fails the step.
+#
+# A Qt 5 qmllint, still what /usr/bin/qmllint is on Arch, has neither option,
+# so only one reporting Qt 6 is picked. A system Qt searches its own qml
+# directory before -I, where an installed Quickshell would shadow the stub, so
+# when qtpaths sits next to qmllint the run is --bare with that directory
+# added back after the stubs. PySide6 has no qtpaths, but its qml directory
+# holds only Qt's own modules.
 step "qmllint"
 qmllint="${QMLLINT:-}"
 if [ -z "$qmllint" ]; then
-  for candidate in qmllint pyside6-qmllint; do
-    if command -v "$candidate" > /dev/null; then qmllint=$candidate; break; fi
+  for candidate in qmllint /usr/lib/qt6/bin/qmllint pyside6-qmllint; do
+    if command -v "$candidate" > /dev/null &&
+      "$candidate" --version 2> /dev/null | grep -q '^qmllint 6\.'; then
+      qmllint=$candidate
+      break
+    fi
   done
 fi
 if [ -n "$qmllint" ]; then
-  "$qmllint" --max-warnings 0 --unused-imports disable -I tests/qml/imports \
+  qmllint_imports=(-I tests/qml/imports)
+  qtpaths="$(dirname "$(readlink -f "$(command -v "$qmllint")")")/qtpaths"
+  if [ -x "$qtpaths" ]; then
+    qmllint_imports=(--bare "${qmllint_imports[@]}"
+      -I "$("$qtpaths" --query QT_INSTALL_QML)")
+  fi
+  "$qmllint" --max-warnings 0 --unused-imports disable "${qmllint_imports[@]}" \
     BarWidget.qml Panel.qml Service.qml || fail qmllint
 else
   missing qmllint qmllint
