@@ -40,6 +40,11 @@ Panel {
   // Pushed in by the bar widget, which paints the dot.
   property bool newEntryIndicator: true
 
+  // Whether every row carries a bookmark to save it with. Off, the bookmark
+  // still appears on a row once it is saved, so saving with "s" is never
+  // silent. Pushed in by the bar widget.
+  property bool saveButton: true
+
   // Text size is offered as named sizes rather than pixel values — the user
   // picks how big the panel reads, and every font size in it is scaled by the
   // matching factor.
@@ -72,6 +77,8 @@ Panel {
   readonly property string errorText: root.miniflux.errorText
   readonly property string saveNotice: root.miniflux.saveNotice
   readonly property var entries: root.miniflux.entries
+  readonly property var savedIds: root.miniflux.savedIds || ({})
+  readonly property int savingId: root.miniflux.savingId || 0
   readonly property int total: root.miniflux.total
   readonly property int listedUnread: root.miniflux.listedUnread
 
@@ -132,6 +139,13 @@ Panel {
     if (!on) root.miniflux.clearNewEntries()
     if (root.hostWidget && typeof root.hostWidget.saveNewEntryIndicator === "function")
       root.hostWidget.saveNewEntryIndicator(on)
+  }
+
+  function setSaveButton(on) {
+    if (on === root.saveButton) return
+    root.saveButton = on
+    if (root.hostWidget && typeof root.hostWidget.saveSaveButton === "function")
+      root.hostWidget.saveSaveButton(on)
   }
 
   // Colours come from the theme: foreground and urgent from the bar (the
@@ -377,6 +391,8 @@ Panel {
     property string errorText: "The Miniflux service is not running. Re-enable the plugin; under a third-party bar, switch back to Omarchy's own bar."
     property string saveNotice: ""
     property var entries: []
+    property var savedIds: ({})
+    property int savingId: 0
     property int total: 0
     readonly property int listedUnread: 0
     signal signedIn()
@@ -669,6 +685,7 @@ Panel {
                     // whole text block is what you press to read it.
                     Column {
                       width: parent.width - markButton.width - Style.space(6)
+                        - (bookmarkButton.visible ? bookmarkButton.width + Style.space(6) : 0)
                       spacing: Style.space(2)
 
                       HoverHandler {
@@ -725,6 +742,26 @@ Panel {
                         font.family: root.fontFamily
                         font.pixelSize: root.fs(Style.font.caption)
                         elide: Text.ElideRight
+                      }
+                    }
+
+                    // Filled once the save integration has the entry, and
+                    // shown then even with the button turned off.
+                    PanelActionButton {
+                      id: bookmarkButton
+                      readonly property bool saved: root.savedIds[entryRow.modelData.id] === true
+                      readonly property bool inFlight: root.savingId === entryRow.modelData.id
+                      visible: root.saveButton || saved || inFlight
+                      anchors.verticalCenter: parent.verticalCenter
+                      // nf-fa-bookmark (U+F02E) / nf-fa-bookmark_o (U+F097)
+                      iconText: saved ? "\uf02e" : "\uf097"
+                      tooltipText: saved ? "Saved" : inFlight ? "Saving…" : "Save (s)"
+                      foreground: saved || inFlight ? root.foreground : root.dim
+                      hoverColor: root.foreground
+                      fontSize: root.fs(Style.font.bodySmall)
+                      onClicked: {
+                        root.selected = entryRow.index
+                        root.miniflux.saveEntry(entryRow.modelData.id)
                       }
                     }
 
@@ -1017,8 +1054,8 @@ Panel {
             }
           }
 
-          // The one on/off setting in the panel, so it reads as a switch
-          // rather than as another minus/plus pair.
+          // The on/off settings read as switches rather than as another
+          // minus/plus pair.
           Item {
             width: parent.width
             height: Math.max(indicatorCaption.implicitHeight, settingsColumn.controlHeight)
@@ -1046,6 +1083,34 @@ Panel {
               trackHeight: Math.round(settingsColumn.controlHeight)
               foreground: root.foreground
               onToggled: root.setNewEntryIndicator(!root.newEntryIndicator)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(saveButtonCaption.implicitHeight, settingsColumn.controlHeight)
+
+            Text {
+              id: saveButtonCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - saveButtonSwitch.width - Style.space(8)
+              text: "Save button on each entry"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: saveButtonSwitch
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.saveButton
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              onToggled: root.setSaveButton(!root.saveButton)
             }
           }
 

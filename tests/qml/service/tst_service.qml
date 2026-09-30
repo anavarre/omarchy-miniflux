@@ -257,23 +257,58 @@ TestCase {
   }
 
   function test_closingLastPanelDropsPlainNotice() {
-    signedIn([1], 1)
     svc.panelOpened()
     svc.panelOpened()
-    svc.saveEntry(1)
-    proc("save-entry").finish(0, "\n202\n", "")
-    compare(svc.saveNotice, "Saved.")
+    svc.noteSaved("Done.")
+    compare(svc.saveNotice, "Done.")
     svc.panelClosed()
-    compare(svc.saveNotice, "Saved.", "another monitor still shows it")
+    compare(svc.saveNotice, "Done.", "another monitor still shows it")
     svc.panelClosed()
     compare(svc.saveNotice, "")
     compare(svc.openPanels, 0)
     svc.panelClosed()
     compare(svc.openPanels, 0, "never below zero")
 
-    svc.saveEntry(1)
-    proc("save-entry").finish(0, "\n202\n", "")
+    svc.noteSaved("Done.")
     compare(svc.saveNotice, "", "nobody to tell once every panel closed")
+  }
+
+  function test_savedEntriesAreMarked() {
+    signedIn([1, 2], 2)
+    svc.saveEntry(1)
+    compare(svc.savingId, 1)
+    var save = proc("save-entry")
+    compare(save.command.slice(3), ["1"])
+    svc.saveEntry(2)
+    compare(save.starts, 1, "one save at a time")
+    save.finish(0, "\n202\n", "")
+    compare(svc.savingId, 0)
+    compare(svc.savedIds, { 1: true })
+    compare(svc.saveNotice, "", "the bookmark is the confirmation")
+
+    svc.saveEntry(1)
+    compare(save.starts, 1, "a saved entry is not sent twice")
+    svc.saveEntry(2)
+    save.finish(0, "\n403\n", "")
+    compare(svc.savedIds, { 1: true }, "a refused save is not marked")
+    compare(svc.errorText, "Miniflux has no save integration enabled for this account.")
+
+    svc.refresh()
+    proc("entries").finish(0, listing([1, 3]), "")
+    compare(svc.savedIds, { 1: true })
+    svc.refresh()
+    proc("entries").finish(0, listing([3]), "")
+    compare(svc.savedIds, ({}), "entries no longer listed are dropped")
+  }
+
+  function test_saveAfterForgetIsIgnored() {
+    signedIn([1], 1)
+    svc.saveEntry(1)
+    svc.forget()
+    proc("forget").finish(0, "", "")
+    proc("save-entry").finish(0, "\n202\n", "")
+    compare(svc.savedIds, ({}))
+    compare(svc.saveEntryBusy, false)
   }
 
   function test_stickyNoticeOutlastsClose() {

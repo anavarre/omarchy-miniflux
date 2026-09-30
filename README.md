@@ -77,7 +77,7 @@ narrower action.
 | `Shift+a` | mark the listed entries read |
 | `r` | refresh |
 | `c` | change credentials |
-| `s` | save the selected entry to your Miniflux save integration |
+| `s` | save the selected entry to your Miniflux save integration; its bookmark fills in |
 | `,` | open settings |
 | `Escape` | close |
 
@@ -100,6 +100,13 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   icon; opening the panel clears it. The first fetch after signing in only sets
   the baseline, so it never starts out dotted. Also in the panel's **Settings**
   section, as a switch.
+- **Save button on each entry** — on by default: every entry carries a bookmark,
+  left of the mark-read check, that saves it to your Miniflux save integration.
+  The bookmark fills in once the entry is saved, and a saved entry shows it even
+  with this off, so saving with `s` is never silent. Miniflux keeps no saved flag
+  on an entry, so this only covers what was saved since the shell started, and a
+  saved entry is not sent again. Also in the panel's **Settings** section, as a
+  switch.
 - **Unread entries only** — off also lists entries you have already read.
 
 ## How it runs
@@ -142,7 +149,7 @@ the store checks), with fictional credentials in a temporary store; QtTest cases
 `Service.qml` (`tests/qml/service`), where a fake `Quickshell.Io` Process never runs
 anything and each test finishes requests by hand — sign-in checks, refreshes folding
 into one follow-up, late answers dropped after a settings change or a forget, the
-mark-read queue and its failure path, the new-entry dot, save notices on panel close,
+mark-read queue and its failure path, the new-entry dot, saved-entry bookmarks, notices on panel close,
 and the IPC throttle and status; `shellcheck`;
 and `qmllint` against stub `qs.Ui`, `qs.Commons` and `Quickshell` modules in
 `tests/qml/imports`. The Omarchy stubs are generated from the upstream revision named

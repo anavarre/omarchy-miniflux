@@ -30,7 +30,8 @@
       "unreadOnly": true,
       "refreshMinutes": 30,
       "textSize": "medium",
-      "newEntryIndicator": true
+      "newEntryIndicator": true,
+      "saveButton": true
     },
     "schema": [
       {
@@ -78,6 +79,13 @@
         "label": "Mark new entries on the bar",
         "defaultValue": true,
         "description": "Puts a dot on the bar icon when a refresh brings in entries you have not seen yet."
+      },
+      {
+        "key": "saveButton",
+        "type": "boolean",
+        "label": "Save button on each entry",
+        "defaultValue": true,
+        "description": "Shows a bookmark on every entry to save it with. Off, the bookmark still appears, filled in, on an entry once it is saved."
       },
       {
         "key": "unreadOnly",

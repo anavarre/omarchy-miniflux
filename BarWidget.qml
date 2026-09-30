@@ -52,6 +52,7 @@ BarWidget {
     panelLoader.item.service = root.service
     panelLoader.item.textSize = Model.knownTextSize(root.setting("textSize", "medium"))
     panelLoader.item.newEntryIndicator = root.newEntryIndicator
+    panelLoader.item.saveButton = root.setting("saveButton", true) === true
   }
 
   // The panel's Settings section writes back through here: the widget owns the
@@ -69,6 +70,7 @@ BarWidget {
   function saveRefreshMinutes(minutes) { root.saveSetting("refreshMinutes", minutes) }
   function saveTextSize(size) { root.saveSetting("textSize", size) }
   function saveNewEntryIndicator(on) { root.saveSetting("newEntryIndicator", on === true) }
+  function saveSaveButton(on) { root.saveSetting("saveButton", on === true) }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

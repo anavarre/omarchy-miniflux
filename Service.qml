@@ -54,12 +54,16 @@ Item {
 
   property bool loading: false
   property string errorText: ""
-  // Transient confirmation for the save shortcut, shown under the header.
+  // A notice under the header: a sign-in warning that asks for action (a key
+  // that could not be revoked), which outlasts a closed panel.
   property string saveNotice: ""
-  // A notice that asks for action (a key that could not be revoked) outlasts
-  // a closed panel; a plain "Saved." does not.
   property bool saveNoticeSticky: false
   property bool saveEntryBusy: false
+  // Entries handed to the save integration, as a map, and the one in flight.
+  // Miniflux keeps no saved flag on an entry, so this is only what this shell
+  // saved since it started; each row reads it to fill in its bookmark.
+  property var savedIds: ({})
+  property int savingId: 0
   property var entries: []
   property int total: 0
 
@@ -166,6 +170,7 @@ Item {
     root.refreshQueued = false
     root.markQueue = []
     root.pending = ({})
+    root.savedIds = ({})
   }
 
   function signIn(server, username, password) {
@@ -260,15 +265,25 @@ Item {
   }
 
   // Hands an entry to the account's save integration. The entry stays in the
-  // list -- saving is not reading -- so the only feedback is the notice, which
-  // clears itself after a few seconds.
+  // list -- saving is not reading -- and its row's bookmark fills in once the
+  // integration has it. Saving it again would only send a duplicate.
   function saveEntry(id) {
-    if (!root.authenticated || root.saveEntryBusy) return
+    if (!root.authenticated || root.saveEntryBusy || root.savedIds[id]) return
     root.saveEntryBusy = true
-    root.saveNotice = ""
+    root.savingId = id
     saveEntryProcess.session = root.session
+    saveEntryProcess.entryId = id
     saveEntryProcess.command = Model.saveEntryCommand(root.api, id)
     saveEntryProcess.running = true
+  }
+
+  // Drops saved marks for entries no longer listed, so the map cannot grow
+  // without bound. An entry that comes back later shows as unsaved.
+  function pruneSaved(list) {
+    var kept = {}
+    for (var i = 0; i < list.length; i++)
+      if (root.savedIds[list[i].id]) kept[list[i].id] = true
+    root.savedIds = kept
   }
 
   // A notice that asks for action stays up long enough to be read and acted on.
@@ -353,6 +368,7 @@ Item {
   Process {
     id: saveEntryProcess
     property int session: 0
+    property int entryId: 0
     running: false
     command: []
     clearEnvironment: true
@@ -361,10 +377,13 @@ Item {
     stderr: StdioCollector { id: saveEntryStderr; waitForEnd: true }
     onExited: function(exitCode) {
       root.saveEntryBusy = false
+      root.savingId = 0
       if (saveEntryProcess.session !== root.session) return
       var response = Model.splitResponse(saveEntryStdout.text)
       if (exitCode === 0 && (response.status === 202 || response.status === 200 || response.status === 204)) {
-        root.noteSaved("Saved.")
+        var saved = Object.assign({}, root.savedIds)
+        saved[saveEntryProcess.entryId] = true
+        root.savedIds = saved
         return
       }
       root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
@@ -531,6 +550,7 @@ Item {
       try {
         var list = Model.parseEntries(response.body)
         root.noteEntries(list)
+        root.pruneSaved(list)
         root.entries = root.withoutPending(list)
         root.total = Math.max(0, Model.totalEntries(response.body) - (list.length - root.entries.length))
       } catch (e) {
