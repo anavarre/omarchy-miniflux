@@ -64,8 +64,8 @@ list without opening it (or re-checks sign-in, when signed out); the tooltip lis
 both. Clicks during a fetch fold into one follow-up request.
 
 Each row shows the entry title, with its feed and age underneath. Clicking the title
-opens it in your default browser; the check button on the right marks that one entry
-read; "Mark as read" marks the entries currently loaded in the panel and nothing
+opens it in your default browser; the check button on the right (unless turned off
+in settings) marks that one entry read; "Mark as read" marks the entries currently loaded in the panel and nothing
 else — unread entries beyond the list are untouched, so a shorter list is also a
 narrower action.
 
@@ -107,6 +107,10 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   on an entry, so this only covers what was saved since the shell started, and a
   saved entry is not sent again. Also in the panel's **Settings** section, as a
   switch.
+- **Mark-read button on each entry** — on by default: every entry carries a check,
+  on the right, that marks it read. Off, `x` still marks the selected entry read,
+  and "Mark as read" still marks the listed entries. Also in the panel's
+  **Settings** section, as a switch.
 - **Unread entries only** — off also lists entries you have already read.
 
 ## How it runs

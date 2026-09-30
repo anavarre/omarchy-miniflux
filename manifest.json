@@ -31,7 +31,8 @@
       "refreshMinutes": 30,
       "textSize": "medium",
       "newEntryIndicator": true,
-      "saveButton": true
+      "saveButton": true,
+      "markReadButton": true
     },
     "schema": [
       {
@@ -86,6 +87,13 @@
         "label": "Save button on each entry",
         "defaultValue": true,
         "description": "Shows a bookmark on every entry to save it with. Off, the bookmark still appears, filled in, on an entry once it is saved."
+      },
+      {
+        "key": "markReadButton",
+        "type": "boolean",
+        "label": "Mark-read button on each entry",
+        "defaultValue": true,
+        "description": "Shows a check on every entry to mark it read with. Off, x still marks the selected entry read."
       },
       {
         "key": "unreadOnly",

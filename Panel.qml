@@ -45,6 +45,10 @@ Panel {
   // silent. Pushed in by the bar widget.
   property bool saveButton: true
 
+  // Whether every row carries a check to mark it read with. Off, "x" still
+  // marks the selected entry read. Pushed in by the bar widget.
+  property bool markReadButton: true
+
   // Text size is offered as named sizes rather than pixel values — the user
   // picks how big the panel reads, and every font size in it is scaled by the
   // matching factor.
@@ -146,6 +150,13 @@ Panel {
     root.saveButton = on
     if (root.hostWidget && typeof root.hostWidget.saveSaveButton === "function")
       root.hostWidget.saveSaveButton(on)
+  }
+
+  function setMarkReadButton(on) {
+    if (on === root.markReadButton) return
+    root.markReadButton = on
+    if (root.hostWidget && typeof root.hostWidget.saveMarkReadButton === "function")
+      root.hostWidget.saveMarkReadButton(on)
   }
 
   // Colours come from the theme: foreground and urgent from the bar (the
@@ -332,8 +343,15 @@ Panel {
     if (root.showSignIn) Qt.callLater(function() { serverField.forceActiveFocus() })
   }
 
+  // The panel only applies focusTarget when it opens, so switching between
+  // the form and the list has to move focus by hand. Otherwise the hidden
+  // form keeps it and swallows every shortcut typed afterwards.
   onShowSignInChanged: {
-    if (!root.opened || !root.showSignIn) return
+    if (!root.opened) return
+    if (!root.showSignIn) {
+      Qt.callLater(function() { keys.forceActiveFocus() })
+      return
+    }
     root.prefillSignIn()
     Qt.callLater(function() { serverField.forceActiveFocus() })
   }
@@ -537,32 +555,49 @@ Panel {
             wrapMode: Text.WordWrap
           }
 
-          Row {
-            spacing: Style.space(6)
+          // Set apart from the fields above and pinned to the right, like the
+          // Done button in Settings. Forgetting the credentials is kept off
+          // the main row, on one of its own below.
+          Item {
+            width: parent.width
+            height: signInActions.implicitHeight + Style.space(24)
 
-            Button {
-              text: root.saving ? "Signing in…" : "Sign in"
-              enabled: !root.saving
-              foreground: root.foreground
-              fontSize: root.fs(Style.font.body)
-              bordered: true
-              onClicked: root.saveSignIn()
-            }
+            Column {
+              id: signInActions
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              spacing: Style.space(6)
 
-            Button {
-              visible: root.authenticated
-              text: "Cancel"
-              foreground: root.foreground
-              fontSize: root.fs(Style.font.body)
-              onClicked: root.cancelSignIn()
-            }
+              Row {
+                anchors.right: parent.right
+                spacing: Style.space(6)
 
-            Button {
-              visible: root.hasSecret
-              text: "Forget credentials"
-              foreground: root.foreground
-              fontSize: root.fs(Style.font.body)
-              onClicked: root.forgetSignIn()
+                Button {
+                  visible: root.authenticated
+                  text: "Cancel"
+                  foreground: root.foreground
+                  fontSize: root.fs(Style.font.body)
+                  onClicked: root.cancelSignIn()
+                }
+
+                Button {
+                  text: root.saving ? "Signing in…" : "Sign in"
+                  enabled: !root.saving
+                  foreground: root.foreground
+                  fontSize: root.fs(Style.font.body)
+                  bordered: true
+                  onClicked: root.saveSignIn()
+                }
+              }
+
+              Button {
+                anchors.right: parent.right
+                visible: root.hasSecret
+                text: "Forget credentials"
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.body)
+                onClicked: root.forgetSignIn()
+              }
             }
           }
         }
@@ -684,7 +719,8 @@ Panel {
                     // The title is the entry: it carries the link, so the
                     // whole text block is what you press to read it.
                     Column {
-                      width: parent.width - markButton.width - Style.space(6)
+                      width: parent.width
+                        - (markButton.visible ? markButton.width + Style.space(6) : 0)
                         - (bookmarkButton.visible ? bookmarkButton.width + Style.space(6) : 0)
                       spacing: Style.space(2)
 
@@ -767,6 +803,7 @@ Panel {
 
                     PanelActionButton {
                       id: markButton
+                      visible: root.markReadButton
                       anchors.verticalCenter: parent.verticalCenter
                       // nf-fa-check (U+F00C)
                       iconText: ""
@@ -1116,16 +1153,57 @@ Panel {
 
           Item {
             width: parent.width
-            height: doneButton.implicitHeight
+            height: Math.max(markReadButtonCaption.implicitHeight, settingsColumn.controlHeight)
 
-            Button {
-              id: doneButton
+            Text {
+              id: markReadButtonCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - markReadButtonSwitch.width - Style.space(8)
+              text: "Mark-read button on each entry"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: markReadButtonSwitch
               anchors.right: parent.right
-              text: "Done"
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.markReadButton
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
               foreground: root.foreground
-              bordered: true
-              fontSize: root.fs(Style.font.bodySmall)
-              onClicked: root.settingsOpen = false
+              onToggled: root.setMarkReadButton(!root.markReadButton)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: settingsActions.implicitHeight + Style.space(24)
+
+            // Cancel closes Settings the way Escape does.
+            Row {
+              id: settingsActions
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              spacing: Style.space(6)
+
+              Button {
+                text: "Cancel"
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.settingsOpen = false
+              }
+
+              Button {
+                text: "Done"
+                foreground: root.foreground
+                bordered: true
+                fontSize: root.fs(Style.font.bodySmall)
+                onClicked: root.settingsOpen = false
+              }
             }
           }
         }

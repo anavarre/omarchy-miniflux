@@ -53,6 +53,7 @@ BarWidget {
     panelLoader.item.textSize = Model.knownTextSize(root.setting("textSize", "medium"))
     panelLoader.item.newEntryIndicator = root.newEntryIndicator
     panelLoader.item.saveButton = root.setting("saveButton", true) === true
+    panelLoader.item.markReadButton = root.setting("markReadButton", true) === true
   }
 
   // The panel's Settings section writes back through here: the widget owns the
@@ -71,6 +72,7 @@ BarWidget {
   function saveTextSize(size) { root.saveSetting("textSize", size) }
   function saveNewEntryIndicator(on) { root.saveSetting("newEntryIndicator", on === true) }
   function saveSaveButton(on) { root.saveSetting("saveButton", on === true) }
+  function saveMarkReadButton(on) { root.saveSetting("markReadButton", on === true) }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
