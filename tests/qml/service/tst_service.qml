@@ -348,4 +348,92 @@ TestCase {
     compare(JSON.parse(raw), { auth: "ok", loading: false, error: false, listed: 2, unread: 2, total: 7, "new": false })
     verify(raw.indexOf("example") < 0 && raw.indexOf("ann") < 0 && raw.indexOf("Entry") < 0)
   }
+
+  function timer(name) {
+    for (var i = 0; i < svc.data.length; i++)
+      if (svc.data[i] && svc.data[i].objectName === name) return svc.data[i]
+    return null
+  }
+
+  readonly property string offline: "curl: (6) Could not resolve host: rss.example.test\n"
+
+  function test_offlineSignInCheckRetriesWithoutTheForm() {
+    proc("auth").finish(20, "", offline)
+    compare(svc.authState, "offline")
+    compare(svc.authError, "", "not reported as a credential problem")
+    compare(svc.authHint, "")
+    compare(svc.errorText, "Can't reach Miniflux (Could not resolve host: rss.example.test). Retrying automatically.")
+    var retry = timer("retryTimer")
+    verify(retry.running)
+    compare(retry.interval, 10000)
+    retry.triggered()
+    compare(proc("auth").starts, 2, "the retry re-checks sign-in")
+    proc("auth").finish(20, "", offline)
+    compare(retry.interval, 20000, "backs off")
+    retry.triggered()
+    proc("auth").finish(0, me(), "")
+    compare(svc.authState, "ok")
+    verify(!retry.running)
+    compare(svc.retryAttempt, 0)
+    proc("entries").finish(0, listing([1, 2]), "")
+    compare(ids(), [1, 2])
+    compare(svc.errorText, "")
+  }
+
+  function test_rejectedCredentialsAreNotRetried() {
+    proc("auth").finish(0, "{}\n401\n", "")
+    compare(svc.authState, "error")
+    verify(!timer("retryTimer").running)
+  }
+
+  function test_failedFetchKeepsListAndRetries() {
+    signedIn([1, 2])
+    svc.refresh()
+    proc("entries").finish(20, "", offline)
+    compare(ids(), [1, 2], "the stale list stays")
+    compare(svc.authState, "ok")
+    verify(/Retrying automatically\.$/.test(svc.errorText))
+    var retry = timer("retryTimer")
+    verify(retry.running)
+    retry.triggered()
+    verify(proc("entries").running)
+    compare(svc.errorText, "")
+    proc("entries").finish(0, "{}\n502\n", "")
+    compare(svc.errorText, "Miniflux answered 502 — the server is unhappy. Retrying automatically.")
+    compare(retry.interval, 20000)
+    retry.triggered()
+    proc("entries").finish(0, listing([3]), "")
+    compare(ids(), [3])
+    verify(!retry.running)
+  }
+
+  function test_backoffIsCapped() {
+    for (var i = 0; i < 10; i++) svc.scheduleRetry()
+    compare(timer("retryTimer").interval, 120000)
+  }
+
+  function test_wakeFromSuspendRefreshes() {
+    signedIn([1])
+    var retry = timer("retryTimer")
+    svc.beat(svc.lastBeat + svc.beatMs)
+    verify(!retry.running, "an ordinary beat does nothing")
+    svc.beat(svc.lastBeat + 8 * 3600000)
+    verify(retry.running, "a jump in the wall clock is a resume")
+    compare(retry.interval, 3000)
+    retry.triggered()
+    verify(proc("entries").running)
+  }
+
+  function test_wakeLeavesARejectedSignInAlone() {
+    proc("auth").finish(0, "{}\n401\n", "")
+    svc.beat(svc.lastBeat + 8 * 3600000)
+    verify(!timer("retryTimer").running)
+  }
+
+  function test_forgetStopsRetrying() {
+    proc("auth").finish(20, "", offline)
+    verify(timer("retryTimer").running)
+    svc.forget()
+    verify(!timer("retryTimer").running)
+  }
 }

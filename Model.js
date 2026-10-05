@@ -269,6 +269,37 @@ function errorMessage(stderr, exitCode, status) {
   return "Request failed (exit " + exitCode + ")"
 }
 
+// Failures worth retrying on their own: curl never got an answer (exit 20:
+// offline, DNS, a timeout, a network not back up after resume) or the server
+// answered that it is down or busy. A 4xx, a setup code or a rejected
+// credential would only fail the same way again, so those wait for the user.
+function isTransient(exitCode, status) {
+  if (exitCode === 20) return true
+  return exitCode === 0 && (status === 429 || status >= 500)
+}
+
+// Seconds before retry n (0-based): 10, 20, 40, 80, then every 2 minutes, so a
+// network that comes back is noticed quickly without polling a down server
+// hard.
+var retryDelays = [10, 20, 40, 80, 120]
+function retryDelayMs(attempt) {
+  var n = Math.max(0, Math.min(retryDelays.length - 1, Math.round(Number(attempt)) || 0))
+  return retryDelays[n] * 1000
+}
+
+// What a transient failure reads as. curl's own line ("curl: (6) Could not
+// resolve host: ...") is kept as the detail, minus its prefix.
+function retryMessage(stderr, exitCode, status) {
+  var base
+  if (exitCode === 20) {
+    var line = errorMessage(stderr, exitCode, status).replace(/^curl: \(\d+\)\s*/, "")
+    base = /^Request failed/.test(line) ? "Can't reach Miniflux." : "Can't reach Miniflux (" + line.replace(/[.\s]+$/, "") + ")."
+  } else {
+    base = errorMessage(stderr, exitCode, status)
+  }
+  return base + " Retrying automatically."
+}
+
 // Settings arrive from shell.json, which anyone can hand-edit, and the manifest
 // schema is only metadata — nothing enforces it. These bring every stored value
 // back inside what the plugin supports, so a typo or an old value can neither

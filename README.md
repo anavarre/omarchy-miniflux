@@ -119,7 +119,17 @@ A background service (`Service.qml`) owns sign-in, the entry list and the refres
 timer, once for the whole shell: with the bar on several monitors there is still one
 fetch per interval, and marking an entry read on one screen takes it off every
 screen. It checks the stored sign-in when the shell starts, so the new-entry dot works
-before the panel has ever been opened. Under a third-party bar that provides no plugin
+before the panel has ever been opened.
+
+It reconnects on its own. When a request never reaches the server (offline, DNS, a
+timeout) or the server answers 5xx or 429, the list on screen stays, the panel shows
+why under the header, and the request is retried after 10, 20, 40 and 80 seconds,
+then every 2 minutes until it goes through. A failed sign-in check made while offline
+is not treated as a credential problem, so the sign-in form does not take over. After
+a suspend or hibernate the list is refreshed a few seconds after wake, without waiting
+for the next interval. A rejected credential or a missing setting still waits for you.
+
+Under a third-party bar that provides no plugin
 services, the panel says so instead of listing entries.
 
 The service also answers to `omarchy-shell anavarre.miniflux <method>`, for a hotkey
@@ -131,7 +141,7 @@ or a status script:
 | `toggle` | opens or closes the panel, as a click on the bar icon would | `ok`, or `unavailable` with no live bar widget |
 | `status` | nothing | `{"auth":"ok","loading":false,"error":false,"listed":10,"unread":10,"total":42,"new":false}` |
 
-`auth` is `unknown`, `checking`, `ok` or `error`; `listed` and `unread` count the
+`auth` is `unknown`, `checking`, `ok`, `offline` (the server could not be reached; retrying) or `error`; `listed` and `unread` count the
 entries the panel holds, `total` those matching its filter on the instance. No answer
 carries the server address, username, entry titles or error text.
 

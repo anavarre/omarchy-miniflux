@@ -30,9 +30,12 @@ Item {
   // 30 minutes up to a day, so the interval can never hammer the instance.
   readonly property int refreshMin: 30
 
-  // "unknown" until the first check, then "checking" / "ok" / "error".
-  // Everything else is gated on "ok", so a credential problem is reported
-  // once, as sign-in, instead of once per request as an opaque 401.
+  // "unknown" until the first check, then "checking" / "ok" / "error", or
+  // "offline" when the check never reached the server. Everything else is
+  // gated on "ok", so a credential problem is reported once, as sign-in,
+  // instead of once per request as an opaque 401. "offline" is not a
+  // credential problem: it keeps the list (and its error line) up instead of
+  // the sign-in form, and clears itself on the next retry that gets through.
   property string authState: "unknown"
   // A setup hint ("enter your username") is advice and reads as such; an
   // error ("Miniflux rejected the stored credentials") is a failure and reads
@@ -104,6 +107,23 @@ Item {
   // How many monitors currently show the panel.
   property int openPanels: 0
 
+  // How many transient failures in a row (see Model.isTransient). Each one
+  // schedules the next attempt a little further out; anything that reaches
+  // the server resets it. Without this, a sign-in check made while offline
+  // (at login, or the instant after resume, before Wi-Fi is back) left the
+  // service in "error" with the refresh timer stopped until the panel was
+  // opened by hand.
+  property int retryAttempt: 0
+  readonly property bool retrying: retryTimer.running
+
+  // Wall-clock time of the last heartbeat. Qt timers run on the monotonic
+  // clock, which stands still during suspend, so after a night asleep the
+  // refresh timer would still be most of an interval away. A heartbeat that
+  // finds the wall clock jumped well past its interval knows the machine was
+  // asleep.
+  property double lastBeat: Date.now()
+  readonly property int beatMs: 30000
+
   readonly property int listedUnread: {
     var n = 0
     for (var i = 0; i < root.entries.length; i++) if (root.entries[i].unread) n++
@@ -152,6 +172,30 @@ Item {
     root.seenIds = seen
   }
 
+  // Tries again later instead of reporting a dead end: the next attempt is
+  // root.refresh(), which re-checks sign-in first when that is what failed.
+  function scheduleRetry() {
+    retryTimer.interval = Model.retryDelayMs(root.retryAttempt)
+    root.retryAttempt++
+    retryTimer.restart()
+  }
+
+  function clearRetry() {
+    root.retryAttempt = 0
+    retryTimer.stop()
+  }
+
+  // Back from suspend: the list is as old as the sleep was long. The network
+  // is often not up yet, so the first try waits a moment, and a miss falls
+  // into the normal backoff from its first step. A sign-in that needs the
+  // user (rejected credentials, nothing stored) is left alone.
+  function resumed() {
+    if (!root.authenticated && root.authState !== "offline") return
+    root.retryAttempt = 0
+    retryTimer.interval = 3000
+    retryTimer.restart()
+  }
+
   function clearAuthMessages() {
     root.authError = ""
     root.authHint = ""
@@ -165,6 +209,7 @@ Item {
   }
 
   function newSession() {
+    root.clearRetry()
     root.session++
     root.listGeneration++
     root.refreshQueued = false
@@ -298,6 +343,14 @@ Item {
     else saveNoticeTimer.stop()
   }
 
+  // A gap of more than two missed beats is a suspend (or a stalled shell,
+  // which is just as stale), not timer jitter.
+  function beat(now) {
+    var gap = now - root.lastBeat
+    root.lastBeat = now
+    if (gap > root.beatMs * 3) root.resumed()
+  }
+
   // Sign-in is checked once at load, so the refresh timer and the bar's
   // new-entry dot work before any panel has been opened.
   Component.onCompleted: root.checkAuth()
@@ -334,7 +387,7 @@ Item {
       return done ? "ok" : "unavailable"
     }
 
-    // {"auth":"unknown|checking|ok|error","loading":bool,"error":bool,
+    // {"auth":"unknown|checking|ok|offline|error","loading":bool,"error":bool,
     //  "listed":n,"unread":n,"total":n,"new":bool}
     function status(): string {
       return JSON.stringify({
@@ -357,6 +410,21 @@ Item {
     repeat: true
     running: root.authenticated
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: retryTimer
+    objectName: "retryTimer"
+    onTriggered: root.refresh()
+  }
+
+  Timer {
+    id: heartbeat
+    objectName: "heartbeat"
+    interval: root.beatMs
+    repeat: true
+    running: true
+    onTriggered: root.beat(Date.now())
   }
 
   Timer {
@@ -493,6 +561,7 @@ Item {
       }
       if (authProcess.session !== root.session) return
       if (Model.needsSetup(exitCode)) {
+        root.clearRetry()
         root.authState = "error"
         root.authError = ""
         root.authHint = Model.setupMessage(exitCode)
@@ -500,6 +569,14 @@ Item {
         return
       }
       var response = Model.splitResponse(authStdout.text)
+      if (Model.isTransient(exitCode, response.status)) {
+        root.authState = "offline"
+        root.clearAuthMessages()
+        root.errorText = Model.retryMessage(authStderr.text, exitCode, response.status)
+        root.scheduleRetry()
+        return
+      }
+      root.clearRetry()
       if (exitCode !== 0 || response.status !== 200) {
         root.authState = "error"
         root.authHint = ""
@@ -537,6 +614,13 @@ Item {
         return
       }
       var response = Model.splitResponse(entriesStdout.text)
+      // The list already on screen stays: it is stale, not wrong.
+      if (Model.isTransient(exitCode, response.status)) {
+        root.errorText = Model.retryMessage(entriesStderr.text, exitCode, response.status)
+        root.scheduleRetry()
+        return
+      }
+      root.clearRetry()
       if (response.status === 401 || response.status === 403) {
         root.authState = "error"
         root.authHint = ""

@@ -166,6 +166,29 @@ test("errorMessage prefers the status, then the last stderr line", () => {
   assert.equal(Model.saveEntryMessage("", 0, 403), "Miniflux has no save integration enabled for this account.")
 })
 
+test("isTransient retries unreachable and down servers only", () => {
+  assert.equal(Model.isTransient(20, 0), true)
+  assert.equal(Model.isTransient(0, 502), true)
+  assert.equal(Model.isTransient(0, 429), true)
+  assert.equal(Model.isTransient(0, 401), false)
+  assert.equal(Model.isTransient(0, 404), false)
+  assert.equal(Model.isTransient(10, 0), false)
+  assert.equal(Model.isTransient(22, 0), false)
+})
+
+test("retryDelayMs backs off and caps at two minutes", () => {
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 50].map(Model.retryDelayMs), [10000, 20000, 40000, 80000, 120000, 120000, 120000])
+  assert.equal(Model.retryDelayMs(-3), 10000)
+  assert.equal(Model.retryDelayMs("x"), 10000)
+})
+
+test("retryMessage keeps curl's detail and says it will retry", () => {
+  assert.equal(Model.retryMessage("curl: (7) Failed to connect to rss.example.test port 443\n", 20, 0),
+    "Can't reach Miniflux (Failed to connect to rss.example.test port 443). Retrying automatically.")
+  assert.equal(Model.retryMessage("", 20, 0), "Can't reach Miniflux. Retrying automatically.")
+  assert.equal(Model.retryMessage("", 0, 503), "Miniflux answered 503 — the server is unhappy. Retrying automatically.")
+})
+
 test("clampEntryLimit keeps 1-100 and treats unset as the default", () => {
   const cases = [[25, 25], ["7", 7], [0, 1], [-5, 1], [500, 100], [3.4, 3],
     [null, 10], ["", 10], [true, 10], [false, 10], ["abc", 10], [undefined, 10], [Infinity, 10]]
