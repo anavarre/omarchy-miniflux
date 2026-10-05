@@ -87,11 +87,15 @@ Panel {
   readonly property int listedUnread: root.miniflux.listedUnread
 
   // The sign-in form. It opens by itself when there is nothing stored or what
-  // is stored no longer works, and on demand from "Account".
+  // is stored no longer works, and on demand from "Account". Asked for while
+  // already signed in, "Account" shows that instead, with only the way to
+  // forget the credentials. Offline still counts: nothing was rejected.
   property bool configuring: false
-  readonly property bool showSignIn: root.configuring || root.authState === "unknown"
-    || (!root.authenticated && (root.authError !== "" || root.authHint !== ""))
-  readonly property bool showSettings: root.settingsOpen && !root.showSignIn
+  readonly property bool signedIn: root.authenticated || root.authState === "offline"
+  readonly property bool showAccount: root.configuring && root.signedIn
+  readonly property bool showSignIn: !root.showAccount && (root.configuring || root.authState === "unknown"
+    || (!root.authenticated && (root.authError !== "" || root.authHint !== "")))
+  readonly property bool showSettings: root.settingsOpen && !root.showSignIn && !root.showAccount
 
   // The Settings section, reached from the footer. It replaces the list while
   // it is up, the way the sign-in form does.
@@ -202,7 +206,7 @@ Panel {
     root.miniflux.clearAuthMessages()
     root.prefillSignIn()
     root.miniflux.loadConfig()
-    Qt.callLater(function() { serverField.forceActiveFocus() })
+    Qt.callLater(function() { (root.showSignIn ? serverField : keys).forceActiveFocus() })
   }
 
   function saveSignIn() {
@@ -211,7 +215,7 @@ Panel {
   }
 
   function cancelSignIn() {
-    if (!root.authenticated) { root.close(); return }
+    if (!root.signedIn) { root.close(); return }
     root.configuring = false
     passField.text = ""
     root.miniflux.clearAuthMessages()
@@ -449,16 +453,23 @@ Panel {
       // The sign-in form owns the keyboard while it is up, so typing a
       // password doesn't drive the list underneath it.
       blocked: root.showSignIn
-      onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveSelection(dy) }
-      onActivateRequested: root.openEntry(root.selected)
+      // The signed-in Account view has nothing to drive but its own buttons:
+      // Escape or Enter goes back to the list, and list keys do nothing.
+      onMoveRequested: function(dx, dy) { if (dy !== 0 && !root.showAccount) root.moveSelection(dy) }
+      onActivateRequested: {
+        if (root.showAccount) root.cancelSignIn()
+        else root.openEntry(root.selected)
+      }
       onCloseRequested: {
-        if (root.shortcutsOpen) root.shortcutsOpen = false
+        if (root.showAccount) root.cancelSignIn()
+        else if (root.shortcutsOpen) root.shortcutsOpen = false
         else if (root.settingsOpen) root.settingsOpen = false
         else root.close()
       }
-      onDeleteRequested: root.markSelectedRead()
+      onDeleteRequested: { if (!root.showAccount) root.markSelectedRead() }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
+        if (root.showAccount) return
         if (text === "r") root.refresh()
         else if (text === "A") root.markAllRead()
         else if (text === "c") root.openSignIn()
@@ -543,18 +554,6 @@ Panel {
             Keys.onEscapePressed: root.cancelSignIn()
           }
 
-          Text {
-            width: parent.width
-            text: "The password is used once, to mint an API key that is stored instead. "
-                + "Instances older than 2.2.9 keep the password in "
-                + (root.miniflux.storeDir !== "" ? root.miniflux.storeDir : "the plugin's credential store")
-                + ", readable only by you."
-            color: root.dim
-            font.family: root.fontFamily
-            font.pixelSize: root.fs(Style.font.caption)
-            wrapMode: Text.WordWrap
-          }
-
           // Set apart from the fields above and pinned to the right, like the
           // Done button in Settings. Forgetting the credentials is kept off
           // the main row, on one of its own below.
@@ -571,14 +570,6 @@ Panel {
               Row {
                 anchors.right: parent.right
                 spacing: Style.space(6)
-
-                Button {
-                  visible: root.authenticated
-                  text: "Cancel"
-                  foreground: root.foreground
-                  fontSize: root.fs(Style.font.body)
-                  onClicked: root.cancelSignIn()
-                }
 
                 Button {
                   text: root.saving ? "Signing in…" : "Sign in"
@@ -602,11 +593,84 @@ Panel {
           }
         }
 
+        // ----------------------------------------------------- signed in
+        Column {
+          width: parent.width
+          spacing: Style.space(8)
+          visible: root.showAccount
+
+          Text {
+            width: parent.width
+            text: "Signed in"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.subtitle)
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            visible: text !== ""
+            textFormat: Text.PlainText
+            text: {
+              var who = root.account !== "" ? root.account : root.miniflux.storedUsername
+              var where = root.miniflux.storedServer
+              if (who !== "" && where !== "") return who + " on " + where
+              return who || where
+            }
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            elide: Text.ElideMiddle
+          }
+
+          // Forgetting can fail (a refused store); say so here, since the
+          // form that would otherwise show it stays hidden.
+          Text {
+            width: parent.width
+            visible: root.authError !== ""
+            textFormat: Text.PlainText
+            text: root.authError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            wrapMode: Text.WordWrap
+          }
+
+          Item {
+            width: parent.width
+            height: accountActions.implicitHeight + Style.space(24)
+
+            Row {
+              id: accountActions
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              spacing: Style.space(6)
+
+              Button {
+                visible: root.hasSecret
+                text: "Forget credentials"
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.body)
+                onClicked: root.forgetSignIn()
+              }
+
+              Button {
+                text: "Return"
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.body)
+                bordered: true
+                onClicked: root.cancelSignIn()
+              }
+            }
+          }
+        }
+
         // ---------------------------------------------------------- the list
         Column {
           width: parent.width
           spacing: Style.space(8)
-          visible: !root.showSignIn && !root.showSettings
+          visible: !root.showSignIn && !root.showSettings && !root.showAccount
 
           Item {
             width: parent.width
