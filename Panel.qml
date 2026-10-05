@@ -122,6 +122,16 @@ Panel {
   // Local to this monitor: which row the keyboard is on.
   property int selected: -1
 
+  // Which Account button the keyboard is on. Return is the default, and the
+  // only choice when there is nothing stored to forget.
+  property bool accountOnForget: false
+  readonly property bool accountForgetFocused: root.accountOnForget && root.hasSecret
+  onShowAccountChanged: root.accountOnForget = false
+
+  // Likewise for the Settings buttons: Done by default, Cancel to its left.
+  property bool settingsOnCancel: false
+  onShowSettingsChanged: root.settingsOnCancel = false
+
   // The service counts open panels, so a background refresh only lights the
   // bar dot while nobody is looking. This remembers which service object was
   // told, so the matching close reaches the same one.
@@ -453,11 +463,20 @@ Panel {
       // The sign-in form owns the keyboard while it is up, so typing a
       // password doesn't drive the list underneath it.
       blocked: root.showSignIn
-      // The signed-in Account view has nothing to drive but its own buttons:
-      // Escape or Enter goes back to the list, and list keys do nothing.
-      onMoveRequested: function(dx, dy) { if (dy !== 0 && !root.showAccount) root.moveSelection(dy) }
+      // The signed-in Account view and Settings have nothing to drive but
+      // their own buttons: left and right pick one, Enter presses it, Escape
+      // goes back to the list, and list keys do nothing.
+      onMoveRequested: function(dx, dy) {
+        if (root.showAccount) { if (dx !== 0) root.accountOnForget = dx < 0 }
+        else if (root.showSettings) { if (dx !== 0) root.settingsOnCancel = dx < 0 }
+        else if (dy !== 0) root.moveSelection(dy)
+      }
       onActivateRequested: {
-        if (root.showAccount) root.cancelSignIn()
+        if (root.showAccount) {
+          if (root.accountForgetFocused) root.forgetSignIn()
+          else root.cancelSignIn()
+        }
+        else if (root.showSettings) root.settingsOpen = false
         else root.openEntry(root.selected)
       }
       onCloseRequested: {
@@ -466,14 +485,14 @@ Panel {
         else if (root.settingsOpen) root.settingsOpen = false
         else root.close()
       }
-      onDeleteRequested: { if (!root.showAccount) root.markSelectedRead() }
+      onDeleteRequested: { if (!root.showAccount && !root.showSettings) root.markSelectedRead() }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
         if (root.showAccount) return
         if (text === "r") root.refresh()
-        else if (text === "A") root.markAllRead()
+        else if (text === "A") { if (!root.showSettings) root.markAllRead() }
         else if (text === "c") root.openSignIn()
-        else if (text === "s") root.saveSelected()
+        else if (text === "s") { if (!root.showSettings) root.saveSelected() }
         else if (text === ",") root.settingsOpen = !root.settingsOpen
         else if (text === "?") root.shortcutsOpen = !root.shortcutsOpen
       }
@@ -647,11 +666,13 @@ Panel {
               anchors.bottom: parent.bottom
               spacing: Style.space(6)
 
+              // The border marks the button Enter presses.
               Button {
                 visible: root.hasSecret
                 text: "Forget credentials"
                 foreground: root.foreground
                 fontSize: root.fs(Style.font.body)
+                bordered: root.accountForgetFocused
                 onClicked: root.forgetSignIn()
               }
 
@@ -659,7 +680,7 @@ Panel {
                 text: "Return"
                 foreground: root.foreground
                 fontSize: root.fs(Style.font.body)
-                bordered: true
+                bordered: !root.accountForgetFocused
                 onClicked: root.cancelSignIn()
               }
             }
@@ -1247,7 +1268,8 @@ Panel {
             width: parent.width
             height: settingsActions.implicitHeight + Style.space(24)
 
-            // Cancel closes Settings the way Escape does.
+            // Cancel closes Settings the way Escape does. The border marks
+            // the button Enter presses.
             Row {
               id: settingsActions
               anchors.right: parent.right
@@ -1257,6 +1279,7 @@ Panel {
               Button {
                 text: "Cancel"
                 foreground: root.foreground
+                bordered: root.settingsOnCancel
                 fontSize: root.fs(Style.font.bodySmall)
                 onClicked: root.settingsOpen = false
               }
@@ -1264,7 +1287,7 @@ Panel {
               Button {
                 text: "Done"
                 foreground: root.foreground
-                bordered: true
+                bordered: !root.settingsOnCancel
                 fontSize: root.fs(Style.font.bodySmall)
                 onClicked: root.settingsOpen = false
               }
