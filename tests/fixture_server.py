@@ -101,6 +101,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"total": 1, "entries": [{"id": 1, "title": "One", "status": "unread"}]})
         if route == "/v1/entries" and self.command == "PUT":
             return self.reply(204)
+        if route.startswith("/v1/icons/") and self.command == "GET":
+            return self.reply(200, {"id": int(route.rsplit("/", 1)[1]), "mime_type": "image/png",
+                                    "data": "image/png;base64,iVBORw0KGgo="})
         if route.startswith("/v1/entries/") and route.endswith("/save"):
             return self.reply(403 if mode == "nosave" else 202)
         return self.reply(404, b"404 page not found")

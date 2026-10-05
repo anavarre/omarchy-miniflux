@@ -41,6 +41,7 @@ BarWidget {
     root.service.entryLimit = Model.clampEntryLimit(root.setting("entryLimit", 10))
     root.service.unreadOnly = root.setting("unreadOnly", true) === true
     root.service.refreshMinutes = Model.snapRefreshMinutes(root.setting("refreshMinutes", 30))
+    root.service.feedIcons = root.setting("feedIcons", false) === true
   }
 
   function injectPanel() {
@@ -73,6 +74,7 @@ BarWidget {
   function saveNewEntryIndicator(on) { root.saveSetting("newEntryIndicator", on === true) }
   function saveSaveButton(on) { root.saveSetting("saveButton", on === true) }
   function saveMarkReadButton(on) { root.saveSetting("markReadButton", on === true) }
+  function saveFeedIcons(on) { root.saveSetting("feedIcons", on === true) }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

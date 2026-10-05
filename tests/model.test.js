@@ -63,6 +63,24 @@ test("saveEntryCommand rounds the id", () => {
   assert.deepEqual(plain(Model.saveEntryCommand(script, 41.6)).slice(2), ["save-entry", "42"])
 })
 
+test("iconCommand rounds the id", () => {
+  assert.deepEqual(plain(Model.iconCommand(script, 7.4)).slice(2), ["icon", "7"])
+})
+
+test("parseIcon only builds base64 image data URLs", () => {
+  const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
+  assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "data:image/png;base64,iVBORw0KGgo=")
+  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,PHN2Zz4=")), "data:image/svg+xml;base64,PHN2Zz4=")
+  assert.equal(Model.parseIcon(icon("text/html;base64,PGI+")), "")
+  assert.equal(Model.parseIcon(icon("image/tiff;base64,AAAA")), "")
+  assert.equal(Model.parseIcon(icon("image/png,<svg>")), "")
+  assert.equal(Model.parseIcon(icon("image/png;base64,AA==\nhttps://evil.example/")), "")
+  assert.equal(Model.parseIcon(icon("https://evil.example/icon.png")), "")
+  assert.equal(Model.parseIcon(icon("image/png;base64," + "A".repeat(600 * 1024))), "")
+  assert.equal(Model.parseIcon("{}"), "")
+  assert.equal(Model.parseIcon("<html>"), "")
+})
+
 test("splitResponse takes the status from the last line", () => {
   assert.deepEqual(plain(Model.splitResponse('{"a":1}\n200\n')), { status: 200, body: '{"a":1}' })
   assert.deepEqual(plain(Model.splitResponse("line one\nline two\n401")), { status: 401, body: "line one\nline two" })
@@ -82,15 +100,15 @@ test("parseEntries tolerates missing fields", () => {
   const body = JSON.stringify({
     total: 2,
     entries: [
-      { id: 5, title: "One", url: "https://a.example/1", feed: { title: "Feed" }, published_at: "2026-01-02T03:04:05Z", status: "unread" },
-      { id: "6", status: "read" },
+      { id: 5, title: "One", url: "https://a.example/1", feed: { title: "Feed", icon: { feed_id: 2, icon_id: 8 } }, published_at: "2026-01-02T03:04:05Z", status: "unread" },
+      { id: "6", status: "read", feed: { icon: { icon_id: "x" } } },
       null
     ]
   })
   assert.deepEqual(plain(Model.parseEntries(body)), [
-    { id: 5, title: "One", url: "https://a.example/1", feed: "Feed", published: "2026-01-02T03:04:05Z", unread: true },
-    { id: 6, title: "", url: "", feed: "", published: "", unread: false },
-    { id: null, title: "", url: "", feed: "", published: "", unread: false }
+    { id: 5, title: "One", url: "https://a.example/1", feed: "Feed", iconId: 8, published: "2026-01-02T03:04:05Z", unread: true },
+    { id: 6, title: "", url: "", feed: "", iconId: 0, published: "", unread: false },
+    { id: null, title: "", url: "", feed: "", iconId: 0, published: "", unread: false }
   ])
   assert.deepEqual(plain(Model.parseEntries("{}")), [])
   assert.throws(() => Model.parseEntries("<html>"))

@@ -32,7 +32,8 @@
       "textSize": "medium",
       "newEntryIndicator": true,
       "saveButton": true,
-      "markReadButton": true
+      "markReadButton": true,
+      "feedIcons": false
     },
     "schema": [
       {
@@ -94,6 +95,13 @@
         "label": "Mark-read button on each entry",
         "defaultValue": true,
         "description": "Shows a check on every entry to mark it read with. Off, x still marks the selected entry read."
+      },
+      {
+        "key": "feedIcons",
+        "type": "boolean",
+        "label": "Feed icon on each entry",
+        "defaultValue": false,
+        "description": "Shows the feed's icon, as Miniflux has it, before every entry. Costs one request per feed listed."
       },
       {
         "key": "unreadOnly",

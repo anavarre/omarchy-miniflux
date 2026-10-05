@@ -35,6 +35,9 @@ Panel {
   readonly property var refreshChoices: Model.refreshChoices
   readonly property int refreshMin: refreshChoices[0]
   readonly property int refreshMax: refreshChoices[refreshChoices.length - 1]
+  // Whether each row leads with its feed's icon. The service fetches them,
+  // so this is its setting too.
+  readonly property bool feedIcons: root.miniflux.feedIcons === true
 
   // Whether a refresh that brings in unseen entries lights up the bar icon.
   // Pushed in by the bar widget, which paints the dot.
@@ -82,6 +85,7 @@ Panel {
   readonly property string saveNotice: root.miniflux.saveNotice
   readonly property var entries: root.miniflux.entries
   readonly property var savedIds: root.miniflux.savedIds || ({})
+  readonly property var icons: root.miniflux.icons || ({})
   readonly property int savingId: root.miniflux.savingId || 0
   readonly property int total: root.miniflux.total
   readonly property int listedUnread: root.miniflux.listedUnread
@@ -171,6 +175,13 @@ Panel {
     root.markReadButton = on
     if (root.hostWidget && typeof root.hostWidget.saveMarkReadButton === "function")
       root.hostWidget.saveMarkReadButton(on)
+  }
+
+  function setFeedIcons(on) {
+    if (on === root.feedIcons) return
+    root.miniflux.feedIcons = on
+    if (root.hostWidget && typeof root.hostWidget.saveFeedIcons === "function")
+      root.hostWidget.saveFeedIcons(on)
   }
 
   // Colours come from the theme: foreground and urgent from the bar (the
@@ -409,6 +420,7 @@ Panel {
     property int entryLimit: 10
     property bool unreadOnly: true
     property int refreshMinutes: 30
+    property bool feedIcons: false
     property string authState: "unavailable"
     property string authHint: ""
     property string authError: ""
@@ -424,6 +436,7 @@ Panel {
     property string saveNotice: ""
     property var entries: []
     property var savedIds: ({})
+    property var icons: ({})
     property int savingId: 0
     property int total: 0
     readonly property int listedUnread: 0
@@ -801,10 +814,47 @@ Panel {
                     width: parent.width - Style.space(12)
                     spacing: Style.space(6)
 
+                    // Level with the title's first line. Until the icon is
+                    // in, or when the feed has none, the slot holds a dim
+                    // RSS glyph so the titles still line up.
+                    Item {
+                      id: iconSlot
+                      readonly property string source: root.icons[entryRow.modelData.iconId] || ""
+                      visible: root.feedIcons
+                      width: root.fs(Style.font.body)
+                      height: width
+                      y: Math.max(0, Math.round((titleText.implicitHeight / Math.max(1, titleText.lineCount) - height) / 2))
+
+                      Image {
+                        id: feedIcon
+                        anchors.fill: parent
+                        // Only ever a data: URL the service checked (see
+                        // Model.parseIcon), never a link out to the feed.
+                        source: iconSlot.source
+                        sourceSize.width: width * 2
+                        sourceSize.height: height * 2
+                        fillMode: Image.PreserveAspectFit
+                        asynchronous: true
+                        smooth: true
+                        mipmap: true
+                      }
+
+                      Text {
+                        anchors.centerIn: parent
+                        visible: feedIcon.status !== Image.Ready
+                        // nf-fa-rss (U+F09E)
+                        text: "\uf09e"
+                        color: root.dim
+                        font.family: root.fontFamily
+                        font.pixelSize: Math.round(iconSlot.width * 0.8)
+                      }
+                    }
+
                     // The title is the entry: it carries the link, so the
                     // whole text block is what you press to read it.
                     Column {
                       width: parent.width
+                        - (iconSlot.visible ? iconSlot.width + Style.space(6) : 0)
                         - (markButton.visible ? markButton.width + Style.space(6) : 0)
                         - (bookmarkButton.visible ? bookmarkButton.width + Style.space(6) : 0)
                       spacing: Style.space(2)
@@ -1261,6 +1311,34 @@ Panel {
               trackHeight: Math.round(settingsColumn.controlHeight)
               foreground: root.foreground
               onToggled: root.setMarkReadButton(!root.markReadButton)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(feedIconsCaption.implicitHeight, settingsColumn.controlHeight)
+
+            Text {
+              id: feedIconsCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - feedIconsSwitch.width - Style.space(8)
+              text: "Feed icon on each entry"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: feedIconsSwitch
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.feedIcons
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              onToggled: root.setFeedIcons(!root.feedIcons)
             }
           }
 

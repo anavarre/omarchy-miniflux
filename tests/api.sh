@@ -75,6 +75,8 @@ expect_rc "mark without ids" 64 -- mark
 expect_rc "mark a non-numeric id" 64 -- mark 1 x
 expect_rc "mark a shell fragment" 64 -- mark '1;id'
 expect_rc "save-entry without an id" 64 -- save-entry
+expect_rc "icon without an id" 64 -- icon
+expect_rc "icon with a path for an id" 64 -- icon ../me
 
 # --- stderr cap ------------------------------------------------------------
 run -- mark "$(printf '%05000d' 0 | tr 0 x)"
@@ -125,6 +127,8 @@ run "${key[@]}" MINIFLUX_SERVER="$base" -- mark 4 9
 check "mark sends one PUT for the batch" has "$(last_request)" '"method": "PUT", "mode": "", "route": "/v1/entries", "query": "", "body": "{\"entry_ids\":[4,9],\"status\":\"read\"}"'
 run "${key[@]}" MINIFLUX_SERVER="$base" -- save-entry 4
 check "save-entry posts to the entry" [ "$(printf '%s' "$out" | tail -n1)" = 202 ] && has "$(last_request)" '"route": "/v1/entries/4/save"'
+run "${key[@]}" MINIFLUX_SERVER="$base" -- icon 12
+check "icon gets the icon by id" [ "$(printf '%s' "$out" | tail -n1)" = 200 ] && has "$(last_request)" '"method": "GET", "mode": "", "route": "/v1/icons/12"'
 
 # --- size cap --------------------------------------------------------------
 expect_rc "an oversized body without a length" 22 "${key[@]}" MINIFLUX_SERVER="$base/big" -- auth

@@ -301,6 +301,66 @@ TestCase {
     compare(svc.savedIds, ({}), "entries no longer listed are dropped")
   }
 
+  function iconListing(pairs) {
+    var entries = []
+    for (var i = 0; i < pairs.length; i++)
+      entries.push({ id: pairs[i][0], title: "Entry", status: "unread", feed: { icon: { icon_id: pairs[i][1] } } })
+    return JSON.stringify({ total: pairs.length, entries: entries }) + "\n200\n"
+  }
+
+  function icon(id) {
+    return JSON.stringify({ id: id, data: "image/png;base64,AAAA" }) + "\n200\n"
+  }
+
+  function test_feedIconsAreOffByDefault() {
+    proc("auth").finish(0, me(), "")
+    proc("entries").finish(0, iconListing([[1, 5]]), "")
+    compare(proc("icon"), null)
+  }
+
+  function test_feedIconsFetchOncePerIcon() {
+    svc.feedIcons = true
+    proc("auth").finish(0, me(), "")
+    proc("entries").finish(0, iconListing([[1, 5], [2, 5], [3, 0], [4, 6]]), "")
+    var p = proc("icon")
+    compare(p.command.slice(3), ["5"])
+    p.finish(0, icon(5), "")
+    tryCompare(p, "starts", 2)
+    compare(p.command.slice(3), ["6"])
+    p.finish(0, "\n404\n", "")
+    compare(svc.icons, { 5: "data:image/png;base64,AAAA", 6: "" })
+    wait(0)
+    compare(p.starts, 2, "entries without an icon, and repeats, are skipped")
+
+    svc.refresh()
+    proc("entries").finish(0, iconListing([[4, 6], [7, 8]]), "")
+    compare(svc.icons, { 6: "" }, "icons no longer listed are dropped")
+    compare(p.command.slice(3), ["8"], "only the new icon is asked for")
+  }
+
+  function test_offlineIconFetchDropsTheQueue() {
+    svc.feedIcons = true
+    proc("auth").finish(0, me(), "")
+    proc("entries").finish(0, iconListing([[1, 5], [2, 6]]), "")
+    var p = proc("icon")
+    p.finish(20, "", "curl: (6) Could not resolve host")
+    wait(0)
+    compare(p.starts, 1)
+    compare(svc.icons, ({}), "nothing recorded, so the next refresh retries")
+    compare(svc.errorText, "")
+  }
+
+  function test_turningFeedIconsOffDropsThem() {
+    svc.feedIcons = true
+    proc("auth").finish(0, me(), "")
+    proc("entries").finish(0, iconListing([[1, 5]]), "")
+    proc("icon").finish(0, icon(5), "")
+    svc.feedIcons = false
+    compare(svc.icons, ({}))
+    svc.feedIcons = true
+    tryCompare(proc("icon"), "starts", 2)
+  }
+
   function test_saveAfterForgetIsIgnored() {
     signedIn([1], 1)
     svc.saveEntry(1)

@@ -27,6 +27,9 @@ Item {
   property int entryLimit: 10
   property bool unreadOnly: true
   property int refreshMinutes: 30
+  // Whether listed entries' feed icons are fetched. Off by default: it costs a
+  // request per feed the list shows.
+  property bool feedIcons: false
   // 30 minutes up to a day, so the interval can never hammer the instance.
   readonly property int refreshMin: 30
 
@@ -69,6 +72,13 @@ Item {
   property int savingId: 0
   property var entries: []
   property int total: 0
+
+  // Feed icons by icon id, as data: URLs, for the listed entries only. A miss
+  // (no icon, a format we skip, a 404) is kept as "" so it is not asked for
+  // again until its feed drops off the list. Fetched one at a time, after the
+  // list lands, from iconQueue.
+  property var icons: ({})
+  property var iconQueue: []
 
   // Entries being marked read are dropped from the list as soon as the
   // request goes out — the round trip is the slow part, and a row that lingers
@@ -216,6 +226,8 @@ Item {
     root.markQueue = []
     root.pending = ({})
     root.savedIds = ({})
+    root.icons = ({})
+    root.iconQueue = []
   }
 
   function signIn(server, username, password) {
@@ -329,6 +341,52 @@ Item {
     for (var i = 0; i < list.length; i++)
       if (root.savedIds[list[i].id]) kept[list[i].id] = true
     root.savedIds = kept
+  }
+
+  // Queues every listed icon not yet known or on its way, and starts on them.
+  function fetchIcons() {
+    if (!root.feedIcons || !root.authenticated) return
+    var queued = {}
+    for (var q = 0; q < root.iconQueue.length; q++) queued[root.iconQueue[q]] = true
+    if (iconProcess.running) queued[iconProcess.iconId] = true
+    var add = []
+    for (var i = 0; i < root.entries.length; i++) {
+      var id = root.entries[i].iconId
+      if (!id || queued[id] || root.icons[id] !== undefined) continue
+      queued[id] = true
+      add.push(id)
+    }
+    if (add.length > 0) root.iconQueue = root.iconQueue.concat(add)
+    root.nextIcon()
+  }
+
+  function nextIcon() {
+    if (iconProcess.running || root.iconQueue.length === 0) return
+    var id = root.iconQueue[0]
+    root.iconQueue = root.iconQueue.slice(1)
+    iconProcess.session = root.session
+    iconProcess.iconId = id
+    iconProcess.command = Model.iconCommand(root.api, id)
+    iconProcess.running = true
+  }
+
+  // Keeps only the icons the list still uses, so the map cannot grow without
+  // bound.
+  function pruneIcons(list) {
+    var kept = {}
+    for (var i = 0; i < list.length; i++) {
+      var id = list[i].iconId
+      if (id && root.icons[id] !== undefined) kept[id] = root.icons[id]
+    }
+    root.icons = kept
+  }
+
+  // Off, nothing is fetched and nothing held; on again, the list's icons are
+  // fetched straight away rather than at the next refresh.
+  onFeedIconsChanged: {
+    if (root.feedIcons) { root.fetchIcons(); return }
+    root.iconQueue = []
+    root.icons = ({})
   }
 
   // A notice that asks for action stays up long enough to be read and acted on.
@@ -455,6 +513,33 @@ Item {
         return
       }
       root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
+    }
+  }
+
+  // An icon that could not be fetched leaves its row on the placeholder. A
+  // network failure drops the rest of the queue rather than failing each
+  // icon in turn; the next refresh asks again. Nothing here touches
+  // errorText: a missing icon is not worth a line under the header.
+  Process {
+    id: iconProcess
+    property int session: 0
+    property int iconId: 0
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: iconStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      if (iconProcess.session !== root.session) { Qt.callLater(root.nextIcon); return }
+      var response = Model.splitResponse(iconStdout.text)
+      if (Model.isTransient(exitCode, response.status) || !root.feedIcons) {
+        root.iconQueue = []
+        return
+      }
+      var icons = Object.assign({}, root.icons)
+      icons[iconProcess.iconId] = exitCode === 0 && response.status === 200 ? Model.parseIcon(response.body) : ""
+      root.icons = icons
+      Qt.callLater(root.nextIcon)
     }
   }
 
@@ -635,8 +720,10 @@ Item {
         var list = Model.parseEntries(response.body)
         root.noteEntries(list)
         root.pruneSaved(list)
+        root.pruneIcons(list)
         root.entries = root.withoutPending(list)
         root.total = Math.max(0, Model.totalEntries(response.body) - (list.length - root.entries.length))
+        root.fetchIcons()
       } catch (e) {
         root.errorText = "Could not read the Miniflux response."
       }

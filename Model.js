@@ -100,6 +100,35 @@ function saveEntryMessage(stderr, exitCode, status) {
   return errorMessage(stderr, exitCode, status)
 }
 
+// One feed icon, by the icon id an entry carries (see parseEntries).
+function iconCommand(script, id) {
+  return [bash, script, "icon", String(Math.round(Number(id)))]
+}
+
+// Formats Qt's image readers handle. An icon in anything else is skipped, so
+// its row shows the placeholder rather than a broken image.
+var iconTypes = ["png", "jpeg", "gif", "webp", "bmp", "x-icon", "vnd.microsoft.icon", "svg+xml"]
+// A favicon is a few KiB; anything past this is not worth holding in memory
+// once per listed feed.
+var iconMaxChars = 512 * 1024
+
+// The icon as a data: URL for an Image, or "" when it is not one we can show.
+// Miniflux sends "mime;base64,payload" without the "data:" scheme; the whole
+// string is checked, so nothing from the server can turn the URL into a
+// remote or local one.
+function parseIcon(body) {
+  var data
+  try {
+    data = text(JSON.parse(body).data)
+  } catch (e) {
+    return ""
+  }
+  if (data.length > iconMaxChars) return ""
+  var m = /^image\/([a-z0-9.+-]+);base64,[A-Za-z0-9+\/]+={0,2}$/.exec(data)
+  if (!m || iconTypes.indexOf(m[1]) < 0) return ""
+  return "data:" + data
+}
+
 // The resolved server and username, and whether a secret is on file, as JSON.
 function configCommand(script) {
   return [bash, script, "config"]
@@ -146,7 +175,8 @@ function parseMe(body) {
 }
 
 // Only the fields the list shows are pulled out, so a feed without an author
-// or a published date just reads a little shorter.
+// or a published date just reads a little shorter. iconId is 0 for a feed
+// Miniflux has no icon for.
 function parseEntries(body) {
   var data = JSON.parse(body)
   var raw = data && data.entries ? data.entries : []
@@ -158,11 +188,17 @@ function parseEntries(body) {
       title: text(e.title),
       url: text(e.url),
       feed: e.feed ? text(e.feed.title) : "",
+      iconId: iconId(e.feed),
       published: text(e.published_at),
       unread: text(e.status) === "unread"
     })
   }
   return out
+}
+
+function iconId(feed) {
+  var n = feed && feed.icon ? Number(feed.icon.icon_id) : 0
+  return isFinite(n) && n > 0 && Math.round(n) === n ? n : 0
 }
 
 function totalEntries(body) {

@@ -19,7 +19,7 @@ omarchy bar move anavarre.miniflux --section right
 Requires `curl` and `bash`, both of which Omarchy already has.
 
 Every request goes through `bin/miniflux-api`, one script with a subcommand per
-request (`auth`, `entries`, `mark`, `save-entry`, `config`, `save`, `forget`); the
+request (`auth`, `entries`, `mark`, `save-entry`, `icon`, `config`, `save`, `forget`); the
 panel only passes it arguments, never shell code. It runs `/usr/bin/bash` on the script with `PATH` fixed to `/usr/bin:/bin` and a scrubbed
 environment: only `HOME`, `XDG_CONFIG_HOME`, the `MINIFLUX_*` variables below, the
 proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case forms)
@@ -111,6 +111,11 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   on the right, that marks it read. Off, `x` still marks the selected entry read,
   and "Mark as read" still marks the listed entries. Also in the panel's
   **Settings** section, as a switch.
+- **Feed icon on each entry** — off by default. On, every entry leads with its
+  feed's icon, the one Miniflux already stores for it, fetched from your instance
+  (never from the feed's own site) once per feed listed and dropped when the feed
+  leaves the list. A feed with no icon, or one Qt cannot draw, shows a dim RSS
+  glyph instead. Also in the panel's **Settings** section, as a switch.
 - **Unread entries only** — off also lists entries you have already read.
 
 ## How it runs
