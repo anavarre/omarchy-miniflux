@@ -1482,6 +1482,20 @@ Panel {
             width: parent.width
             height: settingsActions.implicitHeight + Style.space(24)
 
+            // A discreet way out to the web app for the settings this panel
+            // doesn't cover.
+            PanelActionButton {
+              anchors.left: parent.left
+              anchors.bottom: parent.bottom
+              // nf-fa-external_link (U+F08E)
+              iconText: "\uf08e"
+              tooltipText: "More settings on the web"
+              foreground: root.dim
+              hoverColor: root.foreground
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: Qt.openUrlExternally("https://reader.miniflux.app/settings")
+            }
+
             // Cancel closes Settings the way Escape does. The border marks
             // the button Enter presses.
             Row {
