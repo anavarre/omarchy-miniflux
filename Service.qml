@@ -49,6 +49,11 @@ Item {
   property string account: ""
   readonly property bool authenticated: authState === "ok"
 
+  // The Add feed form's state: a request is out, and why the last one failed.
+  property bool addingFeed: false
+  property string addFeedError: ""
+  signal feedAdded()
+
   property bool saving: false
   property bool hasSecret: false
   // What is on file, for pre-filling the sign-in form. Never the secret.
@@ -216,6 +221,18 @@ Item {
     configProcess.session = root.session
     configProcess.command = Model.configCommand(root.api)
     configProcess.running = true
+  }
+
+  // Adds a feed. Miniflux fetches it on creation, so the list is refreshed as
+  // soon as it is in and the new entries are there to read.
+  function addFeed(url) {
+    if (!root.authenticated || root.addingFeed) return
+    if (String(url).trim() === "") { root.addFeedError = "Enter the address of a feed."; return }
+    root.addingFeed = true
+    root.addFeedError = ""
+    addFeedProcess.session = root.session
+    addFeedProcess.command = Model.addFeedCommand(root.api, url)
+    addFeedProcess.running = true
   }
 
   function newSession() {
@@ -513,6 +530,29 @@ Item {
         return
       }
       root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
+    }
+  }
+
+  Process {
+    id: addFeedProcess
+    property int session: 0
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: addFeedStdout; waitForEnd: true }
+    stderr: StdioCollector { id: addFeedStderr; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.addingFeed = false
+      if (addFeedProcess.session !== root.session) return
+      var response = Model.splitResponse(addFeedStdout.text)
+      if (exitCode === 0 && response.status === 201) {
+        root.addFeedError = ""
+        root.feedAdded()
+        root.refresh()
+        return
+      }
+      root.addFeedError = Model.addFeedMessage(addFeedStderr.text, exitCode, response.status, response.body)
     }
   }
 

@@ -100,6 +100,29 @@ function saveEntryMessage(stderr, exitCode, status) {
   return errorMessage(stderr, exitCode, status)
 }
 
+// Subscribes to a feed. The script checks the address answers and is (or
+// points at) a feed before it subscribes. The address is typed by the user, so
+// it travels in argv as one argument, never through a shell.
+function addFeedCommand(script, url) {
+  return [bash, script, "add-feed", String(url === undefined || url === null ? "" : url).trim()]
+}
+
+// Why a feed was not added. Exit 30 is the script's own check (nothing there
+// that is a feed); a 400 or 500 on the subscribe is Miniflux's, and its own
+// words say why, so they are shown when the body carries them.
+function addFeedMessage(stderr, exitCode, status, body) {
+  if (exitCode === 30) return "No valid feed found at that address."
+  if (exitCode === 31 || (exitCode === 0 && status >= 400 && status !== 401 && status !== 403)) {
+    try {
+      var message = String(JSON.parse(body).error_message || "").trim()
+      if (message !== "") return "Miniflux could not add the feed: " + message.slice(0, 200)
+    } catch (e) {}
+    return "Miniflux could not add the feed."
+  }
+  if (exitCode === 20) return "Can't reach Miniflux."
+  return errorMessage(stderr, exitCode, status)
+}
+
 // One feed icon, by the icon id an entry carries (see parseEntries).
 function iconCommand(script, id) {
   return [bash, script, "icon", String(Math.round(Number(id)))]

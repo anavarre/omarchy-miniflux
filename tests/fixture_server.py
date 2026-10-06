@@ -101,6 +101,21 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"total": 1, "entries": [{"id": 1, "title": "One", "status": "unread"}]})
         if route == "/v1/entries" and self.command == "PUT":
             return self.reply(204)
+        if route == "/v1/discover" and self.command == "POST":
+            url = json.loads(body)["url"]
+            if "nofeed" in url:
+                return self.reply(500, {"error_message": "Unable to discover subscriptions"})
+            if "empty" in url:
+                return self.reply(200, [])
+            # Go's encoder writes & as \u0026, which the script has to undo.
+            kind = "atom" if "atom" in url else "rss"
+            return self.reply(200, ('[{"title":"T","url":"%s","type":"%s"}]' % (url.replace("&", "\\u0026"), kind)).encode())
+        if route == "/v1/categories" and self.command == "GET":
+            return self.reply(200, [{"id": 3, "title": "All"}, {"id": 4, "title": "Other"}])
+        if route == "/v1/feeds" and self.command == "POST":
+            if "refused" in json.loads(body)["feed_url"]:
+                return self.reply(400, {"error_message": "Unable to fetch this feed"})
+            return self.reply(201, {"feed_id": 5})
         if route.startswith("/v1/icons/") and self.command == "GET":
             return self.reply(200, {"id": int(route.rsplit("/", 1)[1]), "mime_type": "image/png",
                                     "data": "image/png;base64,iVBORw0KGgo="})

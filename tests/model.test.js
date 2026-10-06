@@ -59,6 +59,19 @@ test("markReadCommand keeps positive whole ids only", () => {
   assert.deepEqual(ids.slice(3), ["3", "7", "2"])
 })
 
+test("addFeedCommand passes the trimmed address as one argument", () => {
+  assert.deepEqual(plain(Model.addFeedCommand(script, "  https://a.example/feed;id  ")).slice(2), ["add-feed", "https://a.example/feed;id"])
+})
+
+test("addFeedMessage says why a feed was not added", () => {
+  assert.equal(Model.addFeedMessage("", 30, 0, ""), "No valid feed found at that address.")
+  assert.equal(Model.addFeedMessage("", 0, 400, '{"error_message":"Unable to fetch this feed"}'),
+    "Miniflux could not add the feed: Unable to fetch this feed")
+  assert.equal(Model.addFeedMessage("", 0, 500, "not json"), "Miniflux could not add the feed.")
+  assert.equal(Model.addFeedMessage("", 20, 0, ""), "Can't reach Miniflux.")
+  assert.match(Model.addFeedMessage("", 0, 401, ""), /rejected/)
+})
+
 test("saveEntryCommand rounds the id", () => {
   assert.deepEqual(plain(Model.saveEntryCommand(script, 41.6)).slice(2), ["save-entry", "42"])
 })

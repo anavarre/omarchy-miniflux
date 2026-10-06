@@ -69,6 +69,13 @@ in settings) marks that one entry read; "Mark as read" marks the entries current
 else — unread entries beyond the list are untouched, so a shorter list is also a
 narrower action.
 
+The footer reads **Mark as read**, **Add feed**, **Settings** and **Account**. **Add feed** (or `f`)
+opens a form for a feed's address, or a page that links to one. The address is checked
+first — it has to answer and be a valid RSS, Atom or JSON feed, as Miniflux accepts — and only then subscribed to, under your
+first category. Miniflux fetches the feed as it is created, and the list refreshes
+straight after, so its entries are there to read. In the form, `Enter` adds, `↓` moves
+onto the **Cancel** and **Add** buttons, `←`/`→` pick one, `Enter` presses it and `↑` goes back to the field.
+
 | key | |
 |---|---|
 | `j` / `k`, arrows | move the selection |
@@ -76,6 +83,7 @@ narrower action.
 | `x` | mark the selected entry read |
 | `Shift+a` | mark the listed entries read |
 | `r` | refresh |
+| `f` | add a feed |
 | `c` | change credentials |
 | `s` | save the selected entry to your Miniflux save integration; its bookmark fills in |
 | `,` | open settings |

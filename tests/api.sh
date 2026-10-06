@@ -76,6 +76,7 @@ expect_rc "mark a non-numeric id" 64 -- mark 1 x
 expect_rc "mark a shell fragment" 64 -- mark '1;id'
 expect_rc "save-entry without an id" 64 -- save-entry
 expect_rc "icon without an id" 64 -- icon
+expect_rc "add-feed without a URL" 64 -- add-feed
 expect_rc "icon with a path for an id" 64 -- icon ../me
 
 # --- stderr cap ------------------------------------------------------------
@@ -129,6 +130,16 @@ run "${key[@]}" MINIFLUX_SERVER="$base" -- save-entry 4
 check "save-entry posts to the entry" [ "$(printf '%s' "$out" | tail -n1)" = 202 ] && has "$(last_request)" '"route": "/v1/entries/4/save"'
 run "${key[@]}" MINIFLUX_SERVER="$base" -- icon 12
 check "icon gets the icon by id" [ "$(printf '%s' "$out" | tail -n1)" = 200 ] && has "$(last_request)" '"method": "GET", "mode": "", "route": "/v1/icons/12"'
+
+run "${key[@]}" MINIFLUX_SERVER="$base" -- add-feed 'feed.example/rss?a=1&b=2'
+check "add-feed answers 201" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 201 ]
+check "add-feed subscribes under the first category, https assumed, & intact" has "$(last_request)" '"body": "{\"feed_url\":\"https://feed.example/rss?a=1&b=2\",\"category_id\":3}"'
+run "${key[@]}" MINIFLUX_SERVER="$base" -- add-feed https://feed.example/atom.xml
+check "add-feed accepts an Atom feed" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 201 ]
+expect_rc "add-feed with nothing to discover" 30 "${key[@]}" MINIFLUX_SERVER="$base" -- add-feed https://empty.example
+expect_rc "add-feed with a failed discovery" 30 "${key[@]}" MINIFLUX_SERVER="$base" -- add-feed https://nofeed.example
+run "${key[@]}" MINIFLUX_SERVER="$base" -- add-feed https://refused.example
+check "add-feed passes Miniflux's refusal through" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 400 ]
 
 # --- size cap --------------------------------------------------------------
 expect_rc "an oversized body without a length" 22 "${key[@]}" MINIFLUX_SERVER="$base/big" -- auth

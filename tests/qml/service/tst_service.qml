@@ -230,6 +230,31 @@ TestCase {
     compare(proc("auth").starts, 2)
   }
 
+  function test_addFeedRefreshesOnSuccess() {
+    signedIn([1], 1)
+    svc.addFeed("  feed.example/rss ")
+    compare(svc.addingFeed, true)
+    var add = proc("add-feed")
+    compare(add.command[3], "feed.example/rss")
+    svc.addFeed("again")
+    compare(add.starts, 1, "one request at a time")
+    add.finish(0, '{"feed_id":5}\n201\n', "")
+    compare(svc.addingFeed, false)
+    compare(svc.addFeedError, "")
+    compare(proc("entries").starts, 2, "the list is pulled again")
+  }
+
+  function test_addFeedReportsWhyItFailed() {
+    signedIn([1], 1)
+    svc.addFeed("https://nope.example")
+    proc("add-feed").finish(30, "", "No feed found at that address.")
+    compare(svc.addingFeed, false)
+    compare(svc.addFeedError, "No valid feed found at that address.")
+    compare(proc("entries").starts, 1, "nothing is refetched")
+    svc.addFeed("  ")
+    compare(svc.addFeedError, "Enter the address of a feed.")
+  }
+
   function test_failedSignInKeepsState() {
     proc("auth").finish(10, "", "")
     svc.signIn("https://rss.example.test", "ann", "wrong")

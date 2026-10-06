@@ -9,6 +9,8 @@
 #   mark ID...           mark those entries read
 #   save-entry ID        hand the entry to the account's save integration
 #   icon ID              one feed icon, base64 inside the JSON
+#   add-feed URL         check the URL answers and is a feed (or a page that
+#                        points at one), then subscribe to it
 #   config               print the stored server, username, whether a secret
 #                        is on file and where the store is, as JSON (never
 #                        the secret)
@@ -27,7 +29,8 @@
 # Exit codes: 10 no server, 11 no username, 12 no secret, 13 server is plain
 # http:// off this machine, 20 request failed, 21 credentials rejected,
 # 22 response too large, 23 API key could not be minted, 24 the credential
-# store is unsafe or could not be written, 64 bad arguments. Whatever goes to
+# store is unsafe or could not be written, 30 no feed found at that address,
+# 31 Miniflux refused the feed, 64 bad arguments. Whatever goes to
 # stderr is cut off after the first 2 KiB (see the end of the script).
 
 set -u
@@ -201,6 +204,33 @@ cmd_icon() {
   api "/v1/icons/$1"
 }
 
+# POST /v1/discover fetches the address and answers with the feeds it is or
+# links to; an empty answer or an error means nothing usable is there. The
+# first one is then subscribed to under the account's first category, which
+# Miniflux fetches on creation, so the entries are there for the next list.
+# The final answer is passed through like any other, status line last. Go
+# escapes & < > in JSON strings as \u00XX, so the discovered URL is unescaped
+# before it is sent back.
+jsonUrl() { printf '%s' "$1" | tr -d '\000-\037"' | tr -d "\\\\"; }
+cmd_add_feed() {
+  [ "$#" -eq 1 ] || usage "add-feed URL"
+  local url found code body id
+  url=$(printf '%s' "$1" | tr -d '\000-\037 ')
+  case "$url" in http://*|https://*) ;; "") usage "add-feed URL" ;; *) url="https://$url" ;; esac
+  load
+  body=$(api /v1/discover -X POST -H "Content-Type: application/json" --data-binary "{\"url\":\"$(jsonUrl "$url")\"}") || exit $?
+  code=$(printf '%s' "$body" | tail -n1)
+  found=$(printf '%s' "$body" | grep -o '"url"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n1 | sed 's/^"url"[[:space:]]*:[[:space:]]*"//; s/"$//' | sed 's/\\u0026/\&/g; s/\\u003c/</g; s/\\u003e/>/g')
+  if [ "$code" != "200" ] || [ -z "$found" ]; then
+    printf 'No feed found at that address.\n' >&2; exit 30
+  fi
+  body=$(api /v1/categories) || exit $?
+  [ "$(printf '%s' "$body" | tail -n1)" = "200" ] || { printf '%s\n' "$(printf '%s' "$body" | tail -n1)" >&2; exit 31; }
+  id=$(printf '%s' "$body" | grep -o '"id"[[:space:]]*:[[:space:]]*[0-9]*' | head -n1 | tr -cd '0-9')
+  [ -n "$id" ] || { printf 'The account has no category to add a feed to.\n' >&2; exit 31; }
+  api /v1/feeds -X POST -H "Content-Type: application/json" --data-binary "{\"feed_url\":\"$(jsonUrl "$found")\",\"category_id\":$id}"
+}
+
 # What the settings form should show: the resolved server and username,
 # whether a secret is on file, and the store's path (with a leading $HOME
 # shown as ~) for the sign-in hint. The secret itself is never printed. Control
@@ -295,6 +325,7 @@ main() {
     mark) cmd_mark "$@" ;;
     save-entry) cmd_save_entry "$@" ;;
     icon) cmd_icon "$@" ;;
+    add-feed) cmd_add_feed "$@" ;;
     config) cmd_config "$@" ;;
     save) cmd_save "$@" ;;
     forget) cmd_forget "$@" ;;

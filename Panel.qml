@@ -99,11 +99,18 @@ Panel {
   readonly property bool showAccount: root.configuring && root.signedIn
   readonly property bool showSignIn: !root.showAccount && (root.configuring || root.authState === "unknown"
     || (!root.authenticated && (root.authError !== "" || root.authHint !== "")))
-  readonly property bool showSettings: root.settingsOpen && !root.showSignIn && !root.showAccount
+  readonly property bool showSettings: root.settingsOpen && !root.addFeedOpen && !root.showSignIn && !root.showAccount
+  readonly property bool showAddFeed: root.addFeedOpen && !root.showSignIn && !root.showAccount
 
   // The Settings section, reached from the footer. It replaces the list while
   // it is up, the way the sign-in form does.
   property bool settingsOpen: false
+
+  // The Add feed form, reached from the footer or with "f". Like Settings it
+  // replaces the list while it is up.
+  property bool addFeedOpen: false
+  readonly property bool addingFeed: root.miniflux.addingFeed === true
+  readonly property string addFeedError: root.miniflux.addFeedError
 
   // The shortcuts cheat sheet, opened with "?" or the footer's question mark.
   // It floats over whatever section is up rather than replacing it, so you
@@ -115,6 +122,7 @@ Panel {
     { keys: "x", what: "Mark the selected entry read" },
     { keys: "Shift+a", what: "Mark the listed entries read" },
     { keys: "r", what: "Refresh now" },
+    { keys: "f", what: "Add a feed" },
     { keys: "s", what: "Save the selected entry" },
     { keys: ",", what: "Settings" },
     { keys: "c", what: "Account / sign in" },
@@ -135,6 +143,15 @@ Panel {
   // Likewise for the Settings buttons: Done by default, Cancel to its left.
   property bool settingsOnCancel: false
   onShowSettingsChanged: root.settingsOnCancel = false
+
+  // And for the Add feed buttons: Add by default, Cancel to its left. Down
+  // from the field moves the keyboard onto them, Up moves back.
+  property bool addFeedOnCancel: false
+  onShowAddFeedChanged: {
+    root.addFeedOnCancel = false
+    if (!root.opened || root.showSignIn) return
+    Qt.callLater(function() { (root.showAddFeed ? feedField : keys).forceActiveFocus() })
+  }
 
   // The service counts open panels, so a background refresh only lights the
   // bar dot while nobody is looking. This remembers which service object was
@@ -228,6 +245,25 @@ Panel {
     root.prefillSignIn()
     root.miniflux.loadConfig()
     Qt.callLater(function() { (root.showSignIn ? serverField : keys).forceActiveFocus() })
+  }
+
+  function openAddFeed() {
+    if (!root.authenticated) return
+    root.settingsOpen = false
+    feedField.text = ""
+    root.miniflux.addFeedError = ""
+    root.addFeedOpen = true
+  }
+
+  function cancelAddFeed() {
+    root.addFeedOpen = false
+    feedField.text = ""
+    root.miniflux.addFeedError = ""
+  }
+
+  function submitAddFeed() {
+    if (root.addingFeed) return
+    root.miniflux.addFeed(feedField.text)
   }
 
   function saveSignIn() {
@@ -363,6 +399,7 @@ Panel {
     root.selected = root.entries.length > 0 ? 0 : -1
     listView.contentY = 0
     root.settingsOpen = false
+    root.addFeedOpen = false
     if (root.authenticated) root.miniflux.refresh()
     else if (!root.configuring) root.miniflux.checkAuth()
     if (root.showSignIn) Qt.callLater(function() { serverField.forceActiveFocus() })
@@ -398,6 +435,9 @@ Panel {
     function onAuthenticatedChanged() {
       if (root.miniflux.authenticated) root.configuring = false
     }
+    function onFeedAdded() {
+      if (root.addFeedOpen) root.cancelAddFeed()
+    }
     function onStoredServerChanged() { root.prefillSignIn() }
     function onStoredUsernameChanged() { root.prefillSignIn() }
     // A refresh or a mark on another monitor can shorten the list under this
@@ -425,6 +465,8 @@ Panel {
     property string authHint: ""
     property string authError: ""
     property string account: ""
+    property bool addingFeed: false
+    property string addFeedError: ""
     readonly property bool authenticated: false
     property bool saving: false
     property bool hasSecret: false
@@ -442,6 +484,8 @@ Panel {
     readonly property int listedUnread: 0
     signal signedIn()
     signal forgotten()
+    signal feedAdded()
+    function addFeed(url) {}
     function panelOpened() {}
     function panelClosed() {}
     function clearNewEntries() {}
@@ -482,6 +526,10 @@ Panel {
       onMoveRequested: function(dx, dy) {
         if (root.showAccount) { if (dx !== 0) root.accountOnForget = dx < 0 }
         else if (root.showSettings) { if (dx !== 0) root.settingsOnCancel = dx < 0 }
+        else if (root.showAddFeed) {
+          if (dx !== 0) root.addFeedOnCancel = dx < 0
+          else if (dy < 0) feedField.forceActiveFocus()
+        }
         else if (dy !== 0) root.moveSelection(dy)
       }
       onActivateRequested: {
@@ -490,20 +538,26 @@ Panel {
           else root.cancelSignIn()
         }
         else if (root.showSettings) root.settingsOpen = false
+        else if (root.showAddFeed) {
+          if (root.addFeedOnCancel) root.cancelAddFeed()
+          else root.submitAddFeed()
+        }
         else root.openEntry(root.selected)
       }
       onCloseRequested: {
         if (root.showAccount) root.cancelSignIn()
+        else if (root.showAddFeed) root.cancelAddFeed()
         else if (root.shortcutsOpen) root.shortcutsOpen = false
         else if (root.settingsOpen) root.settingsOpen = false
         else root.close()
       }
-      onDeleteRequested: { if (!root.showAccount && !root.showSettings) root.markSelectedRead() }
+      onDeleteRequested: { if (!root.showAccount && !root.showSettings && !root.showAddFeed) root.markSelectedRead() }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
-        if (root.showAccount) return
+        if (root.showAccount || root.showAddFeed) return
         if (text === "r") root.refresh()
         else if (text === "A") { if (!root.showSettings) root.markAllRead() }
+        else if (text === "f") { if (!root.showSettings) root.openAddFeed() }
         else if (text === "c") root.openSignIn()
         else if (text === "s") { if (!root.showSettings) root.saveSelected() }
         else if (text === ",") root.settingsOpen = !root.settingsOpen
@@ -700,11 +754,93 @@ Panel {
           }
         }
 
+        // --------------------------------------------------------- add feed
+        Column {
+          width: parent.width
+          spacing: Style.space(8)
+          visible: root.showAddFeed
+
+          Text {
+            width: parent.width
+            text: "Add feed"
+            color: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.subtitle)
+            font.bold: true
+          }
+
+          Text {
+            width: parent.width
+            visible: root.addingFeed
+            textFormat: Text.PlainText
+            text: "Checking the feed…"
+            color: root.dim
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            wrapMode: Text.WordWrap
+          }
+
+          Text {
+            width: parent.width
+            visible: root.addFeedError !== ""
+            textFormat: Text.PlainText
+            text: root.addFeedError
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.bodySmall)
+            wrapMode: Text.WordWrap
+          }
+
+          TextField {
+            id: feedField
+            width: parent.width
+            enabled: !root.addingFeed
+            foreground: root.foreground
+            font.family: root.fontFamily
+            font.pixelSize: root.fs(Style.font.body)
+            placeholderText: "https://example.org/feed.xml"
+            onAccepted: root.submitAddFeed()
+            Keys.onEscapePressed: root.cancelAddFeed()
+            Keys.onDownPressed: keys.forceActiveFocus()
+          }
+
+          // Pinned to the right like the Account and Settings buttons. The
+          // border marks the button Enter presses once the keyboard is on them.
+          Item {
+            width: parent.width
+            height: addFeedActions.implicitHeight + Style.space(24)
+
+            Row {
+              id: addFeedActions
+              anchors.right: parent.right
+              anchors.bottom: parent.bottom
+              spacing: Style.space(6)
+
+              Button {
+                text: "Cancel"
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.body)
+                bordered: root.addFeedOnCancel && keys.activeFocus
+                onClicked: root.cancelAddFeed()
+              }
+
+              Button {
+                text: root.addingFeed ? "Adding…" : "Add"
+                enabled: !root.addingFeed
+                foreground: root.foreground
+                fontSize: root.fs(Style.font.body)
+                bordered: !root.addFeedOnCancel || !keys.activeFocus
+                onClicked: root.submitAddFeed()
+              }
+            }
+          }
+        }
+
         // ---------------------------------------------------------- the list
         Column {
           width: parent.width
           spacing: Style.space(8)
-          visible: !root.showSignIn && !root.showSettings && !root.showAccount
+          visible: !root.showSignIn && !root.showSettings && !root.showAccount && !root.showAddFeed
 
           Item {
             width: parent.width
@@ -965,19 +1101,19 @@ Panel {
             spacing: Style.space(6)
 
             Button {
-              text: "Refresh"
-              enabled: !root.loading
-              foreground: root.foreground
-              fontSize: root.fs(Style.font.bodySmall)
-              onClicked: root.refresh()
-            }
-
-            Button {
               text: "Mark as read"
               enabled: root.listedUnread > 0
               foreground: root.foreground
               fontSize: root.fs(Style.font.bodySmall)
               onClicked: root.markAllRead()
+            }
+
+            Button {
+              text: "Add feed"
+              enabled: root.authenticated
+              foreground: root.foreground
+              fontSize: root.fs(Style.font.bodySmall)
+              onClicked: root.openAddFeed()
             }
 
             Button {
