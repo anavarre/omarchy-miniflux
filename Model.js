@@ -149,6 +149,10 @@ function parseIcon(body) {
   if (data.length > iconMaxChars) return ""
   var m = /^image\/([a-z0-9.+-]+);base64,[A-Za-z0-9+\/]+={0,2}$/.exec(data)
   if (!m || iconTypes.indexOf(m[1]) < 0) return ""
+  // Qt's SVG decoder inflates gzip (magic 1f 8b, "H4" + s-v in base64) before
+  // any size limit applies, so a small payload can expand to hundreds of MiB.
+  // Plain SVG is bounded by iconMaxChars; compressed SVG is not shown.
+  if (m[1] === "svg+xml" && /^image\/svg\+xml;base64,H4[s-v]/.test(data)) return ""
   return "data:" + data
 }
 

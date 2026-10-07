@@ -85,6 +85,7 @@ test("parseIcon only builds base64 image data URLs", () => {
   assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "data:image/png;base64,iVBORw0KGgo=")
   assert.equal(Model.parseIcon(icon("image/svg+xml;base64,PHN2Zz4=")), "data:image/svg+xml;base64,PHN2Zz4=")
   assert.equal(Model.parseIcon(icon("text/html;base64,PGI+")), "")
+  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,H4sIAAAAAAAAA7PRtwEAAAAA")), "")
   assert.equal(Model.parseIcon(icon("image/tiff;base64,AAAA")), "")
   assert.equal(Model.parseIcon(icon("image/png,<svg>")), "")
   assert.equal(Model.parseIcon(icon("image/png;base64,AA==\nhttps://evil.example/")), "")
