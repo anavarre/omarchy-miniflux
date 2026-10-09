@@ -68,11 +68,31 @@ function authCommand(script) {
 // The latest entries, newest published first. Unread only by default; the
 // setting that turns that off asks for every status so a quiet list still has
 // something to show.
-function entriesCommand(script, limit, unreadOnly) {
+function entriesCommand(script, limit, unreadOnly, sortOrder) {
   var n = Number(limit)
   if (!isFinite(n) || n < 1) n = 10
   n = Math.min(100, Math.round(n))
-  return [bash, script, "entries", String(n), unreadOnly ? "unread" : "all"]
+  return [bash, script, "entries", String(n), unreadOnly ? "unread" : "all", knownSortOrder(sortOrder)]
+}
+
+function knownSortOrder(value) {
+  return value === "oldest" ? "oldest" : "newest"
+}
+
+// Gathers each feed's entries together, keeping the feeds in the order they
+// first appear and the entries in the order they came, so the list's sort
+// order still decides what leads.
+function groupByFeed(list) {
+  var order = []
+  var groups = {}
+  for (var i = 0; i < list.length; i++) {
+    var key = list[i].feedId > 0 ? "id" + list[i].feedId : "title" + list[i].feed
+    if (!groups[key]) { groups[key] = []; order.push(key) }
+    groups[key].push(list[i])
+  }
+  var out = []
+  for (var j = 0; j < order.length; j++) out = out.concat(groups[order[j]])
+  return out
 }
 
 // Marks a batch read in one request. Entry ids are not secret, so they can
@@ -216,6 +236,7 @@ function parseEntries(body) {
       title: text(e.title),
       url: text(e.url),
       feed: e.feed ? text(e.feed.title) : "",
+      feedId: e.feed && isFinite(Number(e.feed.id)) ? Number(e.feed.id) : 0,
       iconId: iconId(e.feed),
       published: text(e.published_at),
       unread: text(e.status) === "unread"

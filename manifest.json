@@ -33,7 +33,9 @@
       "newEntryIndicator": true,
       "saveButton": true,
       "markReadButton": true,
-      "feedIcons": false
+      "feedIcons": false,
+      "sortOrder": "newest",
+      "groupByFeed": false
     },
     "schema": [
       {
@@ -102,6 +104,24 @@
         "label": "Feed icon on each entry",
         "defaultValue": false,
         "description": "Shows the feed's icon, as Miniflux has it, before every entry. Costs one request per feed listed."
+      },
+      {
+        "key": "sortOrder",
+        "type": "enum",
+        "label": "Order",
+        "defaultValue": "newest",
+        "options": [
+          "newest",
+          "oldest"
+        ],
+        "description": "Which entries lead the list: the most recent (newest) or the oldest first."
+      },
+      {
+        "key": "groupByFeed",
+        "type": "boolean",
+        "label": "Group entries by feed",
+        "defaultValue": false,
+        "description": "Lists each feed's entries together under the feed's name."
       },
       {
         "key": "unreadOnly",

@@ -5,7 +5,8 @@
 # by hand to debug a sign-in.
 #
 #   auth                 GET /v1/me with the stored credentials
-#   entries LIMIT FILTER latest entries, LIMIT 1-100, FILTER unread|all
+#   entries LIMIT FILTER [ORDER] latest entries, LIMIT 1-100, FILTER unread|all,
+#                        ORDER newest (default) or oldest
 #   mark ID...           mark those entries read
 #   save-entry ID        hand the entry to the account's save integration
 #   icon ID              one feed icon, base64 inside the JSON
@@ -162,12 +163,14 @@ cmd_auth() {
   api /v1/me
 }
 
-# The latest entries, newest published first. "all" asks for every status so
-# a quiet list still has something to show.
+# The latest entries, newest published first unless ORDER is "oldest". "all"
+# asks for every status so a quiet list still has something to show.
 cmd_entries() {
-  [ "$#" -eq 2 ] || usage "entries LIMIT unread|all"
+  [ "$#" -eq 2 ] || [ "$#" -eq 3 ] || usage "entries LIMIT unread|all [newest|oldest]"
   number "$1"; [ "$1" -le 100 ] || usage "limit above 100: $1"
-  local query="/v1/entries?order=published_at&direction=desc&limit=$1"
+  local direction=desc
+  case "${3:-newest}" in newest) ;; oldest) direction=asc ;; *) usage "order must be newest or oldest: $3" ;; esac
+  local query="/v1/entries?order=published_at&direction=$direction&limit=$1"
   case "$2" in unread) query="$query&status=unread" ;; all) ;; *) usage "filter must be unread or all: $2" ;; esac
   load
   api "$query"

@@ -124,6 +124,13 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   (never from the feed's own site) once per feed listed and dropped when the feed
   leaves the list. A feed with no icon, or one Qt cannot draw, shows a dim RSS
   glyph instead. Also in the panel's **Settings** section, as a switch.
+- **Oldest entries first** — off by default, so the most recent entries lead. On,
+  the oldest lead instead. In `shell.json` this is `"sortOrder": "newest"` or
+  `"oldest"`. Also in the panel's **Settings** section, as a switch.
+- **Group entries by feed** — off by default. On, each feed's entries are listed
+  together under the feed's name, feeds in the order they first appear in the list
+  and entries in the chosen order. Only the entries fetched are grouped, so the
+  entry limit still applies to the list as a whole. Also in **Settings**.
 - **Unread entries only** — off also lists entries you have already read.
 
 ## How it runs

@@ -42,6 +42,8 @@ BarWidget {
     root.service.unreadOnly = root.setting("unreadOnly", true) === true
     root.service.refreshMinutes = Model.snapRefreshMinutes(root.setting("refreshMinutes", 30))
     root.service.feedIcons = root.setting("feedIcons", false) === true
+    root.service.sortOrder = Model.knownSortOrder(root.setting("sortOrder", "newest"))
+    root.service.groupByFeed = root.setting("groupByFeed", false) === true
   }
 
   function injectPanel() {
@@ -75,6 +77,8 @@ BarWidget {
   function saveSaveButton(on) { root.saveSetting("saveButton", on === true) }
   function saveMarkReadButton(on) { root.saveSetting("markReadButton", on === true) }
   function saveFeedIcons(on) { root.saveSetting("feedIcons", on === true) }
+  function saveSortOrder(order) { root.saveSetting("sortOrder", Model.knownSortOrder(order)) }
+  function saveGroupByFeed(on) { root.saveSetting("groupByFeed", on === true) }
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight

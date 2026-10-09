@@ -45,13 +45,27 @@ test("localPath only accepts file:// URLs", () => {
 })
 
 test("entriesCommand clamps the limit and picks the filter", () => {
-  const args = (limit, unread) => plain(Model.entriesCommand(script, limit, unread)).slice(3)
+  const args = (limit, unread) => plain(Model.entriesCommand(script, limit, unread)).slice(3, 5)
   assert.deepEqual(args(25, true), ["25", "unread"])
   assert.deepEqual(args(25, false), ["25", "all"])
   assert.deepEqual(args(0, true), ["10", "unread"])
   assert.deepEqual(args("abc", true), ["10", "unread"])
   assert.deepEqual(args(1000, true), ["100", "unread"])
   assert.deepEqual(args(4.6, true), ["5", "unread"])
+})
+
+test("entriesCommand passes a known sort order, newest otherwise", () => {
+  const order = (v) => plain(Model.entriesCommand(script, 5, true, v)).slice(3)[2]
+  assert.equal(order("oldest"), "oldest")
+  assert.equal(order("newest"), "newest")
+  assert.equal(order(undefined), "newest")
+  assert.equal(order("sideways"), "newest")
+})
+
+test("groupByFeed gathers feeds in first-seen order and keeps entry order", () => {
+  const e = (id, feedId, feed) => ({ id, feedId, feed })
+  const out = Model.groupByFeed([e(1, 7, "A"), e(2, 8, "B"), e(3, 7, "A"), e(4, 0, "C"), e(5, 0, "C"), e(6, 8, "B")])
+  assert.deepEqual(plain(out).map((x) => x.id), [1, 3, 2, 6, 4, 5])
 })
 
 test("markReadCommand keeps positive whole ids only", () => {
@@ -115,15 +129,15 @@ test("parseEntries tolerates missing fields", () => {
   const body = JSON.stringify({
     total: 2,
     entries: [
-      { id: 5, title: "One", url: "https://a.example/1", feed: { title: "Feed", icon: { feed_id: 2, icon_id: 8 } }, published_at: "2026-01-02T03:04:05Z", status: "unread" },
+      { id: 5, title: "One", url: "https://a.example/1", feed: { id: 3, title: "Feed", icon: { feed_id: 2, icon_id: 8 } }, published_at: "2026-01-02T03:04:05Z", status: "unread" },
       { id: "6", status: "read", feed: { icon: { icon_id: "x" } } },
       null
     ]
   })
   assert.deepEqual(plain(Model.parseEntries(body)), [
-    { id: 5, title: "One", url: "https://a.example/1", feed: "Feed", iconId: 8, published: "2026-01-02T03:04:05Z", unread: true },
-    { id: 6, title: "", url: "", feed: "", iconId: 0, published: "", unread: false },
-    { id: null, title: "", url: "", feed: "", iconId: 0, published: "", unread: false }
+    { id: 5, title: "One", url: "https://a.example/1", feed: "Feed", feedId: 3, iconId: 8, published: "2026-01-02T03:04:05Z", unread: true },
+    { id: 6, title: "", url: "", feed: "", feedId: 0, iconId: 0, published: "", unread: false },
+    { id: null, title: "", url: "", feed: "", feedId: 0, iconId: 0, published: "", unread: false }
   ])
   assert.deepEqual(plain(Model.parseEntries("{}")), [])
   assert.throws(() => Model.parseEntries("<html>"))

@@ -71,6 +71,7 @@ expect_rc "entries limit 0" 64 -- entries 0 all
 expect_rc "entries limit 101" 64 -- entries 101 all
 expect_rc "entries limit with a leading zero" 64 -- entries 05 all
 expect_rc "entries unknown filter" 64 -- entries 5 starred
+expect_rc "entries unknown order" 64 -- entries 5 all sideways
 expect_rc "mark without ids" 64 -- mark
 expect_rc "mark a non-numeric id" 64 -- mark 1 x
 expect_rc "mark a shell fragment" 64 -- mark '1;id'
@@ -122,6 +123,8 @@ check "an awkward password reaches the server intact" has "$(last_request)" '"pa
 
 run "${key[@]}" MINIFLUX_SERVER="$base" -- entries 5 unread
 check "entries asks for the limit and unread" has "$(last_request)" '"query": "order=published_at&direction=desc&limit=5&status=unread"'
+run "${key[@]}" MINIFLUX_SERVER="$base" -- entries 3 all oldest
+check "entries oldest asks for ascending" has "$(last_request)" '"query": "order=published_at&direction=asc&limit=3"'
 run "${key[@]}" MINIFLUX_SERVER="$base" -- entries 3 all
 check "entries all asks for every status" has "$(last_request)" '"query": "order=published_at&direction=desc&limit=3"'
 run "${key[@]}" MINIFLUX_SERVER="$base" -- mark 4 9

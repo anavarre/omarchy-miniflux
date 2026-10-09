@@ -38,6 +38,8 @@ Panel {
   // Whether each row leads with its feed's icon. The service fetches them,
   // so this is its setting too.
   readonly property bool feedIcons: root.miniflux.feedIcons === true
+  readonly property bool oldestFirst: root.miniflux.sortOrder === "oldest"
+  readonly property bool groupByFeed: root.miniflux.groupByFeed === true
 
   // Whether a refresh that brings in unseen entries lights up the bar icon.
   // Pushed in by the bar widget, which paints the dot.
@@ -199,6 +201,21 @@ Panel {
     root.miniflux.feedIcons = on
     if (root.hostWidget && typeof root.hostWidget.saveFeedIcons === "function")
       root.hostWidget.saveFeedIcons(on)
+  }
+
+  function setOldestFirst(on) {
+    if (on === root.oldestFirst) return
+    var order = on ? "oldest" : "newest"
+    root.miniflux.sortOrder = order
+    if (root.hostWidget && typeof root.hostWidget.saveSortOrder === "function")
+      root.hostWidget.saveSortOrder(order)
+  }
+
+  function setGroupByFeed(on) {
+    if (on === root.groupByFeed) return
+    root.miniflux.groupByFeed = on
+    if (root.hostWidget && typeof root.hostWidget.saveGroupByFeed === "function")
+      root.hostWidget.saveGroupByFeed(on)
   }
 
   // Colours come from the theme: foreground and urgent from the bar (the
@@ -461,6 +478,8 @@ Panel {
     property bool unreadOnly: true
     property int refreshMinutes: 30
     property bool feedIcons: false
+    property string sortOrder: "newest"
+    property bool groupByFeed: false
     property string authState: "unavailable"
     property string authHint: ""
     property string authError: ""
@@ -929,160 +948,185 @@ Panel {
               Repeater {
                 model: root.entries
 
-                Rectangle {
-                  id: entryRow
+                Column {
+                  id: group
                   required property int index
                   required property var modelData
-
+                  readonly property bool startsGroup: root.groupByFeed
+                    && (group.index === 0 || root.entries[group.index - 1].feedId !== group.modelData.feedId
+                      || root.entries[group.index - 1].feed !== group.modelData.feed)
                   width: parent.width
-                  height: row.implicitHeight + Style.space(8)
-                  radius: Style.space(4)
-                  color: entryRow.index === root.selected || rowHover.hovered
-                    ? Style.hoverFillFor(root.foreground, root.accent, root.urgent)
-                    : "transparent"
+                  spacing: Style.space(2)
 
-                  HoverHandler { id: rowHover }
+                  Text {
+                    width: parent.width
+                    visible: group.startsGroup
+                    height: visible ? implicitHeight + Style.space(4) : 0
+                    verticalAlignment: Text.AlignBottom
+                    textFormat: Text.PlainText
+                    text: group.modelData.feed !== "" ? group.modelData.feed : "Unknown feed"
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: root.fs(Style.font.caption)
+                    font.bold: true
+                    elide: Text.ElideRight
+                  }
 
-                  Row {
-                    id: row
-                    x: Style.space(6)
-                    y: Style.space(4)
-                    width: parent.width - Style.space(12)
-                    spacing: Style.space(6)
+                  Rectangle {
+                    id: entryRow
+                    readonly property int index: group.index
+                    readonly property var modelData: group.modelData
 
-                    // Level with the title's first line. Until the icon is
-                    // in, or when the feed has none, the slot holds a dim
-                    // RSS glyph so the titles still line up.
-                    Item {
-                      id: iconSlot
-                      readonly property string source: root.icons[entryRow.modelData.iconId] || ""
-                      visible: root.feedIcons
-                      width: root.fs(Style.font.body)
-                      height: width
-                      y: Math.max(0, Math.round((titleText.implicitHeight / Math.max(1, titleText.lineCount) - height) / 2))
+                    width: parent.width
+                    height: row.implicitHeight + Style.space(8)
+                    radius: Style.space(4)
+                    color: entryRow.index === root.selected || rowHover.hovered
+                      ? Style.hoverFillFor(root.foreground, root.accent, root.urgent)
+                      : "transparent"
 
-                      Image {
-                        id: feedIcon
-                        anchors.fill: parent
-                        // Only ever a data: URL the service checked (see
-                        // Model.parseIcon), never a link out to the feed.
-                        source: iconSlot.source
-                        sourceSize.width: width * 2
-                        sourceSize.height: height * 2
-                        fillMode: Image.PreserveAspectFit
-                        asynchronous: true
-                        smooth: true
-                        mipmap: true
-                      }
+                    HoverHandler { id: rowHover }
 
-                      Text {
-                        anchors.centerIn: parent
-                        visible: feedIcon.status !== Image.Ready
-                        // nf-fa-rss (U+F09E)
-                        text: "\uf09e"
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: Math.round(iconSlot.width * 0.8)
-                      }
-                    }
+                    Row {
+                      id: row
+                      x: Style.space(6)
+                      y: Style.space(4)
+                      width: parent.width - Style.space(12)
+                      spacing: Style.space(6)
 
-                    // The title is the entry: it carries the link, so the
-                    // whole text block is what you press to read it.
-                    Column {
-                      width: parent.width
-                        - (iconSlot.visible ? iconSlot.width + Style.space(6) : 0)
-                        - (markButton.visible ? markButton.width + Style.space(6) : 0)
-                        - (bookmarkButton.visible ? bookmarkButton.width + Style.space(6) : 0)
-                      spacing: Style.space(2)
+                      // Level with the title's first line. Until the icon is
+                      // in, or when the feed has none, the slot holds a dim
+                      // RSS glyph so the titles still line up.
+                      Item {
+                        id: iconSlot
+                        readonly property string source: root.icons[entryRow.modelData.iconId] || ""
+                        visible: root.feedIcons
+                        width: root.fs(Style.font.body)
+                        height: width
+                        y: Math.max(0, Math.round((titleText.implicitHeight / Math.max(1, titleText.lineCount) - height) / 2))
 
-                      HoverHandler {
-                        id: titleHover
-                        cursorShape: Qt.PointingHandCursor
-                      }
+                        Image {
+                          id: feedIcon
+                          anchors.fill: parent
+                          // Only ever a data: URL the service checked (see
+                          // Model.parseIcon), never a link out to the feed.
+                          source: iconSlot.source
+                          sourceSize.width: width * 2
+                          sourceSize.height: height * 2
+                          fillMode: Image.PreserveAspectFit
+                          asynchronous: true
+                          smooth: true
+                          mipmap: true
+                        }
 
-                      TapHandler {
-                        onTapped: {
-                          root.selected = entryRow.index
-                          root.openEntry(entryRow.index)
+                        Text {
+                          anchors.centerIn: parent
+                          visible: feedIcon.status !== Image.Ready
+                          // nf-fa-rss (U+F09E)
+                          text: "\uf09e"
+                          color: root.dim
+                          font.family: root.fontFamily
+                          font.pixelSize: Math.round(iconSlot.width * 0.8)
                         }
                       }
 
-                      Text {
-                        id: titleText
+                      // The title is the entry: it carries the link, so the
+                      // whole text block is what you press to read it.
+                      Column {
                         width: parent.width
-                        // Feed text, so never AutoText: rich text would let a
-                        // title pull a remote <img> when the panel opens.
-                        textFormat: Text.PlainText
-                        text: Model.decodeTitle(entryRow.modelData.title)
-                        color: root.foreground
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fs(Style.font.body)
-                        font.underline: titleHover.hovered
-                        wrapMode: Text.WordWrap
-                        maximumLineCount: 2
-                        elide: Text.ElideRight
+                          - (iconSlot.visible ? iconSlot.width + Style.space(6) : 0)
+                          - (markButton.visible ? markButton.width + Style.space(6) : 0)
+                          - (bookmarkButton.visible ? bookmarkButton.width + Style.space(6) : 0)
+                        spacing: Style.space(2)
 
-                        // Only a cut-off title needs one. PanelToolTip never
-                        // wraps, so cap it at the title's width and wrap it
-                        // here, or a long title runs off the panel.
-                        PanelToolTip {
-                          id: titleTip
-                          visible: titleHover.hovered && titleText.truncated
-                          text: titleText.text
-                          fontFamily: root.fontFamily
-                          width: Math.min(implicitWidth, titleText.width)
+                        HoverHandler {
+                          id: titleHover
+                          cursorShape: Qt.PointingHandCursor
+                        }
 
-                          Binding {
-                            target: titleTip.contentItem
-                            property: "wrapMode"
-                            value: Text.WordWrap
+                        TapHandler {
+                          onTapped: {
+                            root.selected = entryRow.index
+                            root.openEntry(entryRow.index)
                           }
                         }
+
+                        Text {
+                          id: titleText
+                          width: parent.width
+                          // Feed text, so never AutoText: rich text would let a
+                          // title pull a remote <img> when the panel opens.
+                          textFormat: Text.PlainText
+                          text: Model.decodeTitle(entryRow.modelData.title)
+                          color: root.foreground
+                          font.family: root.fontFamily
+                          font.pixelSize: root.fs(Style.font.body)
+                          font.underline: titleHover.hovered
+                          wrapMode: Text.WordWrap
+                          maximumLineCount: 2
+                          elide: Text.ElideRight
+
+                          // Only a cut-off title needs one. PanelToolTip never
+                          // wraps, so cap it at the title's width and wrap it
+                          // here, or a long title runs off the panel.
+                          PanelToolTip {
+                            id: titleTip
+                            visible: titleHover.hovered && titleText.truncated
+                            text: titleText.text
+                            fontFamily: root.fontFamily
+                            width: Math.min(implicitWidth, titleText.width)
+
+                            Binding {
+                              target: titleTip.contentItem
+                              property: "wrapMode"
+                              value: Text.WordWrap
+                            }
+                          }
+                        }
+
+                        Text {
+                          width: parent.width
+                          textFormat: Text.PlainText
+                          text: [root.groupByFeed ? "" : entryRow.modelData.feed, Model.formatAge(entryRow.modelData.published)]
+                            .filter(function(v) { return v !== "" }).join(" · ")
+                          color: root.dim
+                          font.family: root.fontFamily
+                          font.pixelSize: root.fs(Style.font.caption)
+                          elide: Text.ElideRight
+                        }
                       }
 
-                      Text {
-                        width: parent.width
-                        textFormat: Text.PlainText
-                        text: [entryRow.modelData.feed, Model.formatAge(entryRow.modelData.published)]
-                          .filter(function(v) { return v !== "" }).join(" · ")
-                        color: root.dim
-                        font.family: root.fontFamily
-                        font.pixelSize: root.fs(Style.font.caption)
-                        elide: Text.ElideRight
+                      // Filled once the save integration has the entry, and
+                      // shown then even with the button turned off.
+                      PanelActionButton {
+                        id: bookmarkButton
+                        readonly property bool saved: root.savedIds[entryRow.modelData.id] === true
+                        readonly property bool inFlight: root.savingId === entryRow.modelData.id
+                        visible: root.saveButton || saved || inFlight
+                        anchors.verticalCenter: parent.verticalCenter
+                        // nf-fa-bookmark (U+F02E) / nf-fa-bookmark_o (U+F097)
+                        iconText: saved ? "\uf02e" : "\uf097"
+                        tooltipText: saved ? "Saved" : inFlight ? "Saving…" : "Save (s)"
+                        foreground: saved || inFlight ? root.foreground : root.dim
+                        hoverColor: root.foreground
+                        fontSize: root.fs(Style.font.bodySmall)
+                        onClicked: {
+                          root.selected = entryRow.index
+                          root.miniflux.saveEntry(entryRow.modelData.id)
+                        }
                       }
-                    }
 
-                    // Filled once the save integration has the entry, and
-                    // shown then even with the button turned off.
-                    PanelActionButton {
-                      id: bookmarkButton
-                      readonly property bool saved: root.savedIds[entryRow.modelData.id] === true
-                      readonly property bool inFlight: root.savingId === entryRow.modelData.id
-                      visible: root.saveButton || saved || inFlight
-                      anchors.verticalCenter: parent.verticalCenter
-                      // nf-fa-bookmark (U+F02E) / nf-fa-bookmark_o (U+F097)
-                      iconText: saved ? "\uf02e" : "\uf097"
-                      tooltipText: saved ? "Saved" : inFlight ? "Saving…" : "Save (s)"
-                      foreground: saved || inFlight ? root.foreground : root.dim
-                      hoverColor: root.foreground
-                      fontSize: root.fs(Style.font.bodySmall)
-                      onClicked: {
-                        root.selected = entryRow.index
-                        root.miniflux.saveEntry(entryRow.modelData.id)
+                      PanelActionButton {
+                        id: markButton
+                        visible: root.markReadButton
+                        anchors.verticalCenter: parent.verticalCenter
+                        // nf-fa-check (U+F00C)
+                        iconText: ""
+                        tooltipText: "Mark as read"
+                        foreground: root.dim
+                        hoverColor: root.foreground
+                        fontSize: root.fs(Style.font.bodySmall)
+                        onClicked: root.markRead([entryRow.modelData.id])
                       }
-                    }
-
-                    PanelActionButton {
-                      id: markButton
-                      visible: root.markReadButton
-                      anchors.verticalCenter: parent.verticalCenter
-                      // nf-fa-check (U+F00C)
-                      iconText: ""
-                      tooltipText: "Mark as read"
-                      foreground: root.dim
-                      hoverColor: root.foreground
-                      fontSize: root.fs(Style.font.bodySmall)
-                      onClicked: root.markRead([entryRow.modelData.id])
                     }
                   }
                 }
@@ -1475,6 +1519,62 @@ Panel {
               trackHeight: Math.round(settingsColumn.controlHeight)
               foreground: root.foreground
               onToggled: root.setFeedIcons(!root.feedIcons)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(sortOrderCaption.implicitHeight, settingsColumn.controlHeight)
+
+            Text {
+              id: sortOrderCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - sortOrderSwitch.width - Style.space(8)
+              text: "Oldest entries first"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: sortOrderSwitch
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.oldestFirst
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              onToggled: root.setOldestFirst(!root.oldestFirst)
+            }
+          }
+
+          Item {
+            width: parent.width
+            height: Math.max(groupByFeedCaption.implicitHeight, settingsColumn.controlHeight)
+
+            Text {
+              id: groupByFeedCaption
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: parent.width - groupByFeedSwitch.width - Style.space(8)
+              text: "Group entries by feed"
+              elide: Text.ElideRight
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: root.fs(Style.font.body)
+            }
+
+            ToggleSwitch {
+              id: groupByFeedSwitch
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              checked: root.groupByFeed
+              cursorRing: false
+              trackHeight: Math.round(settingsColumn.controlHeight)
+              foreground: root.foreground
+              onToggled: root.setGroupByFeed(!root.groupByFeed)
             }
           }
 

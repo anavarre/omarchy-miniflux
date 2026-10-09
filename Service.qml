@@ -27,6 +27,10 @@ Item {
   property int entryLimit: 10
   property bool unreadOnly: true
   property int refreshMinutes: 30
+  // "newest" or "oldest" published first, and whether each feed's entries are
+  // listed together.
+  property string sortOrder: "newest"
+  property bool groupByFeed: false
   // Whether listed entries' feed icons are fetched. Off by default: it costs a
   // request per feed the list shows.
   property bool feedIcons: false
@@ -278,7 +282,7 @@ Item {
     root.loading = true
     root.errorText = ""
     entriesProcess.generation = root.listGeneration
-    entriesProcess.command = Model.entriesCommand(root.api, root.entryLimit, root.unreadOnly)
+    entriesProcess.command = Model.entriesCommand(root.api, root.entryLimit, root.unreadOnly, root.sortOrder)
     entriesProcess.running = true
     autoRefresh.restart()
   }
@@ -290,6 +294,8 @@ Item {
   }
   onEntryLimitChanged: root.listSettingsChanged()
   onUnreadOnlyChanged: root.listSettingsChanged()
+  onSortOrderChanged: root.listSettingsChanged()
+  onGroupByFeedChanged: root.listSettingsChanged()
 
   function withoutPending(list) {
     var kept = []
@@ -761,7 +767,7 @@ Item {
         root.noteEntries(list)
         root.pruneSaved(list)
         root.pruneIcons(list)
-        root.entries = root.withoutPending(list)
+        root.entries = root.withoutPending(root.groupByFeed ? Model.groupByFeed(list) : list)
         root.total = Math.max(0, Model.totalEntries(response.body) - (list.length - root.entries.length))
         root.fetchIcons()
       } catch (e) {

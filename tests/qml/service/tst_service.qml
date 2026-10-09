@@ -78,7 +78,7 @@ TestCase {
     var entries = proc("entries")
     verify(entries.running)
     compare(svc.loading, true)
-    compare(entries.command.slice(3), ["10", "unread"])
+    compare(entries.command.slice(3), ["10", "unread", "newest"])
     entries.finish(0, listing([1, 2]), "")
     compare(ids(), [1, 2])
     compare(svc.total, 2)
