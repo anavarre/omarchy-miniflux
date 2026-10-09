@@ -104,6 +104,14 @@ const magic = {
   webp: [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]
 }
 
+const chunk = (type, len) => {
+  const head = Buffer.alloc(8)
+  head.writeUInt32BE(len, 0)
+  head.write(type, 4, "latin1")
+  return Buffer.concat([head, Buffer.alloc(len), Buffer.alloc(4)])
+}
+const png = (...types) => Buffer.concat([Buffer.from(magic.png), ...types.map((t) => chunk(t, 4))])
+
 test("base64Head decodes only the bytes asked for", () => {
   assert.deepEqual(plain(Model.base64Head("iVBORw0KGgo=", 12)), magic.png)
   assert.deepEqual(plain(Model.base64Head("iVBORw0KGgo=", 3)), [0x89, 0x50, 0x4e])
@@ -113,12 +121,18 @@ test("base64Head decodes only the bytes asked for", () => {
 
 test("parseIcon only builds base64 image data URLs", () => {
   const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
-  assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "data:image/png;base64,iVBORw0KGgo=")
+  const plainPng = b64(png("IHDR", "IDAT", "IEND"))
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${plainPng}`)), `data:image/png;base64,${plainPng}`)
+  // Qt inflates and keeps text and profile chunks before any size limit applies.
+  for (const bad of ["zTXt", "iTXt", "tEXt", "iCCP", "eXIf", "abCD"])
+    assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(png("IHDR", bad, "IDAT", "IEND"))}`)), "", bad)
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(png("IHDR", "IDAT"))}`)), "")
+  assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "")
   for (const kind of ["jpeg", "gif", "bmp", "webp"])
     assert.equal(Model.parseIcon(icon(`image/${kind};base64,${b64(magic[kind])}`)), `data:image/${kind};base64,${b64(magic[kind])}`, kind)
   assert.equal(Model.parseIcon(icon(`image/x-icon;base64,${b64(magic.ico)}`)), `data:image/x-icon;base64,${b64(magic.ico)}`)
   // A favicon served under the wrong label is still a raster Qt can draw.
-  assert.equal(Model.parseIcon(icon(`image/x-icon;base64,${b64(magic.png)}`)), `data:image/x-icon;base64,${b64(magic.png)}`)
+  assert.equal(Model.parseIcon(icon(`image/x-icon;base64,${plainPng}`)), `data:image/x-icon;base64,${plainPng}`)
   assert.equal(Model.parseIcon(icon("text/html;base64,PGI+")), "")
   assert.equal(Model.parseIcon(icon("image/tiff;base64,AAAA")), "")
   assert.equal(Model.parseIcon(icon("image/png,<svg>")), "")

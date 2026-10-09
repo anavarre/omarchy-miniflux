@@ -198,6 +198,45 @@ function base64Head(s, count) {
   return out
 }
 
+// Chunks a PNG icon may carry. Qt's PNG reader inflates every text chunk
+// (tEXt, zTXt, iTXt) and the ICC profile into strings it keeps, before any
+// pixel-size limit applies, so a small file can cost hundreds of MiB. Only
+// the chunks needed to draw the image are allowed; anything else, including
+// unknown ancillary chunks, rejects the icon.
+var pngChunks = ["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB",
+                 "sBIT", "bKGD", "pHYs", "acTL", "fcTL", "fdAT"]
+
+function base64Bytes(s) {
+  var out = []
+  var bits = 0, value = 0
+  for (var i = 0; i < s.length; i++) {
+    var c = base64Alphabet.indexOf(s.charAt(i))
+    if (c < 0) break
+    value = ((value << 6) | c) & 0xffffff
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      out.push((value >> bits) & 0xff)
+    }
+  }
+  return out
+}
+
+// True when the bytes are a well-formed chain of allowed PNG chunks.
+function isPlainPng(b) {
+  if (b.length < 8 + 12) return false
+  var pos = 8
+  var sawEnd = false
+  while (pos + 12 <= b.length) {
+    var len = b[pos] * 16777216 + (b[pos + 1] << 16) + (b[pos + 2] << 8) + b[pos + 3]
+    var type = String.fromCharCode(b[pos + 4], b[pos + 5], b[pos + 6], b[pos + 7])
+    if (pngChunks.indexOf(type) < 0) return false
+    pos += 12 + len
+    if (type === "IEND") { sawEnd = true; break }
+  }
+  return sawEnd
+}
+
 // The icon as a data: URL for an Image, or "" when it is not one we can show.
 // Miniflux sends "mime;base64,payload" without the "data:" scheme; the whole
 // string is checked, so nothing from the server can turn the URL into a
@@ -213,7 +252,9 @@ function parseIcon(body) {
   if (data.length > iconMaxChars) return ""
   var m = /^image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+\/]+={0,2})$/.exec(data)
   if (!m || iconTypes.indexOf(m[1]) < 0) return ""
-  if (!isRasterMagic(base64Head(m[2], 12))) return ""
+  var head = base64Head(m[2], 12)
+  if (!isRasterMagic(head)) return ""
+  if (head[0] === 0x89 && !isPlainPng(base64Bytes(m[2]))) return ""
   return "data:" + data
 }
 
