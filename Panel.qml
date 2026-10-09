@@ -1583,17 +1583,20 @@ Panel {
             height: settingsActions.implicitHeight + Style.space(24)
 
             // A discreet way out to the web app for the settings this panel
-            // doesn't cover.
+            // doesn't cover: the settings page of the user's own instance,
+            // never a hosted one they may not have an account with.
             PanelActionButton {
+              readonly property string url: Model.serverSettingsUrl(root.miniflux.storedServer)
               anchors.left: parent.left
               anchors.bottom: parent.bottom
               // nf-fa-external_link (U+F08E)
               iconText: "\uf08e"
               tooltipText: "More settings on the web"
+              enabled: url !== ""
               foreground: root.dim
               hoverColor: root.foreground
               fontSize: root.fs(Style.font.bodySmall)
-              onClicked: Qt.openUrlExternally("https://reader.miniflux.app/settings")
+              onClicked: { if (url !== "") Qt.openUrlExternally(url) }
             }
 
             // Cancel closes Settings the way Escape does. The border marks

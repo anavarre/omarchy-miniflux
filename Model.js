@@ -148,17 +148,61 @@ function iconCommand(script, id) {
   return [bash, script, "icon", String(Math.round(Number(id)))]
 }
 
-// Formats Qt's image readers handle. An icon in anything else is skipped, so
-// its row shows the placeholder rather than a broken image.
-var iconTypes = ["png", "jpeg", "gif", "webp", "bmp", "x-icon", "vnd.microsoft.icon", "svg+xml"]
+// Raster formats Qt's image readers handle. An icon in anything else is
+// skipped, so its row shows the placeholder rather than a broken image.
+//
+// SVG is deliberately not among them. Qt's SVG decoder runs in the shell's
+// own process on a document the feed's site wrote: its <image href> loads
+// whatever local file path it names and paints it into the icon, it inflates
+// gzip before any size limit applies, and the parser itself is a far larger
+// surface than a PNG decoder. A feed whose icon is an SVG shows the
+// placeholder glyph instead.
+var iconTypes = ["png", "jpeg", "gif", "webp", "bmp", "x-icon", "vnd.microsoft.icon"]
 // A favicon is a few KiB; anything past this is not worth holding in memory
 // once per listed feed.
 var iconMaxChars = 512 * 1024
 
+// Qt sniffs the bytes rather than trusting the declared type, so the MIME
+// allowlist alone would still let an SVG (or anything else) in under an
+// "image/png" label. The payload's first bytes have to carry one of these
+// signatures: PNG, JPEG, GIF, WebP (RIFF....WEBP), BMP, ICO.
+function isRasterMagic(bytes) {
+  if (bytes.length < 4) return false
+  var b = bytes
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return true
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return true
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38) return true
+  if (b[0] === 0x42 && b[1] === 0x4d) return true
+  if (b[0] === 0x00 && b[1] === 0x00 && b[2] === 0x01 && b[3] === 0x00) return true
+  if (b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+      && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) return true
+  return false
+}
+
+// The first `count` bytes of a base64 string, decoded by hand: atob is not
+// available in a .pragma library on every Qt, and only the header is needed.
+var base64Alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+function base64Head(s, count) {
+  var out = []
+  var bits = 0, value = 0
+  for (var i = 0; i < s.length && out.length < count; i++) {
+    var c = base64Alphabet.indexOf(s.charAt(i))
+    if (c < 0) break
+    value = (value << 6) | c
+    bits += 6
+    if (bits >= 8) {
+      bits -= 8
+      out.push((value >> bits) & 0xff)
+    }
+  }
+  return out
+}
+
 // The icon as a data: URL for an Image, or "" when it is not one we can show.
 // Miniflux sends "mime;base64,payload" without the "data:" scheme; the whole
 // string is checked, so nothing from the server can turn the URL into a
-// remote or local one.
+// remote or local one, and the decoded header has to be a known raster
+// format, so nothing can reach the SVG decoder whatever it is labelled.
 function parseIcon(body) {
   var data
   try {
@@ -167,19 +211,28 @@ function parseIcon(body) {
     return ""
   }
   if (data.length > iconMaxChars) return ""
-  var m = /^image\/([a-z0-9.+-]+);base64,[A-Za-z0-9+\/]+={0,2}$/.exec(data)
+  var m = /^image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+\/]+={0,2})$/.exec(data)
   if (!m || iconTypes.indexOf(m[1]) < 0) return ""
-  // Qt sniffs content rather than trusting the declared type, and its SVG
-  // decoder inflates gzip (magic 1f 8b, "H4" + s-v in base64) before any size
-  // limit applies, so a small payload can expand to hundreds of MiB. Reject
-  // gzip bytes whatever the MIME type; plain SVG is bounded by iconMaxChars.
-  if (/^image\/[a-z0-9.+-]+;base64,H4[s-v]/.test(data)) return ""
+  if (!isRasterMagic(base64Head(m[2], 12))) return ""
   return "data:" + data
 }
 
 // The resolved server and username, and whether a secret is on file, as JSON.
 function configCommand(script) {
   return [bash, script, "config"]
+}
+
+// The web app's settings page on the user's own instance, or "" when no
+// server is known. The stored address is normalised the way the script does
+// it (https:// assumed, no trailing slash); anything that is still not an
+// http(s) URL is refused rather than handed to openUrlExternally.
+function serverSettingsUrl(server) {
+  var s = text(server).trim()
+  if (s === "") return ""
+  if (!/^https?:\/\//i.test(s)) s = "https://" + s
+  s = s.replace(/\/+$/, "")
+  if (!/^https?:\/\/[^\/\s]+(\/|$)/i.test(s)) return ""
+  return s + "/settings"
 }
 
 // Verifies and stores what the login form collected. The values go on stdin,

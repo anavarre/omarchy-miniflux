@@ -62,13 +62,18 @@ secret() { [ -r "$1" ] && head -n1 "$1" | tr -d "\r\n"; }
 # Each file is written to a temporary name inside the store and renamed into
 # place, so a crash or a full disk leaves the old file whole rather than a
 # truncated secret, and rename replaces a planted symlink instead of
-# following it. mktemp creates the file 0600 before anything is written.
+# following it. mktemp creates the file 0600 before anything is written. A
+# directory planted under the file's name is refused: mv would move the file
+# into it, where nothing reads it. A failure is reported and returned, not
+# exited, so the caller can put the store back into one piece (see cmd_save).
 put() {
   local t
-  t=$(mktemp "$store/.$1.XXXXXX") || exit 24
+  if [ -d "$store/$1" ]; then printf 'Could not write %s: it is a directory.\n' "$store/$1" >&2; return 1; fi
+  t=$(mktemp "$store/.$1.XXXXXX") || { printf 'Could not write %s.\n' "$store/$1" >&2; return 1; }
   if printf '%s' "$2" > "$t" && chmod 600 "$t" && mv -f "$t" "$store/$1"; then return 0; fi
-  rm -f "$t"; printf 'Could not write %s.\n' "$store/$1" >&2; exit 24
+  rm -f "$t"; printf 'Could not write %s.\n' "$store/$1" >&2; return 1
 }
+wipe() { rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"; }
 
 # Basic auth and X-Auth-Token are both cleartext on the wire, so a plain
 # http:// server is refused unless it is loopback, where nothing leaves the
@@ -100,12 +105,18 @@ plain() {
 # -q must come first: it stops curl reading ~/.curlrc, which could otherwise
 # switch on `location` or `insecure` and undo all of the above. --proto pins
 # the one scheme the server was accepted with, and --proto-redir keeps any
-# redirect on https:// should one ever be followed.
+# redirect on https:// should one ever be followed. -g turns URL globbing
+# off: the server address is typed by hand, and without it `[1-9]` or `{a,b}`
+# in it would fan one request out into many (and an IPv6 literal would not
+# parse). A plain http:// server is loopback by construction (see plain), so
+# the proxy variables are ignored for it: curl would otherwise send the
+# cleartext request, credentials and all, to whatever host http_proxy or
+# all_proxy names.
 cap=$((16 * 1024 * 1024))
 fetch() {
-  local LC_ALL=C out rc=0 proto="=https"
-  case "$server" in http://*) proto="=http" ;; esac
-  out=$(curl -q --proto "$proto" --proto-redir =https --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?
+  local LC_ALL=C out rc=0 proto="=https" noproxy=()
+  case "$server" in http://*) proto="=http"; noproxy=(--noproxy '*') ;; esac
+  out=$(curl -q -g --proto "$proto" --proto-redir =https ${noproxy[@]+"${noproxy[@]}"} --connect-timeout 10 --max-time 30 --max-filesize "$cap" -K - "$@" | head -c $((cap + 1)); exit "${PIPESTATUS[0]}") || rc=$?
   if [ "$rc" -eq 63 ] || [ "${#out}" -gt "$cap" ]; then
     printf 'Miniflux sent more than %s MiB.\n' $((cap / 1048576)) >&2; return 22
   fi
@@ -299,23 +310,32 @@ cmd_save() {
   [ -r "$store/config" ] && oldserver=$(sed -n "s/^server=//p" "$store/config" | head -n1)
   if ! { mkdir -p "$store" && chmod 700 "$store"; }; then printf 'Could not create %s.\n' "$store" >&2; exit 24; fi
   unsafe && exit 24
-  put config "server=$server"$'\n'"username=$username"$'\n'
-  if [ -n "$tok" ]; then
-    put token "$tok"; rm -f "$store/password"
-    if [ -n "$kid" ]; then put token-id "$kid"; else rm -f "$store/token-id"; fi
-    if [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then
-      rv=$(basic | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""
-      case "$(printf '%s' "$rv" | tail -n1)" in 204|404) ;; *) printf 'revoke-failed %s\n' "$old" ;; esac
+  # The files are only meaningful together: a config naming the new server
+  # next to the secret minted for the old one would send that secret to the
+  # wrong instance on the next request. If any write fails, everything is
+  # removed, so the store is either whole or empty (and asks to sign in).
+  store_all() {
+    put config "server=$server"$'\n'"username=$username"$'\n' || return 1
+    if [ -n "$tok" ]; then
+      put token "$tok" || return 1
+      rm -f "$store/password"
+      if [ -n "$kid" ]; then put token-id "$kid" || return 1; else rm -f "$store/token-id"; fi
+    else
+      put password "$password" || return 1
+      rm -f "$store/token" "$store/token-id"
     fi
-  else
-    put password "$password"; rm -f "$store/token" "$store/token-id"
+  }
+  store_all || { wipe; exit 24; }
+  if [ -n "$tok" ] && [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then
+    rv=$(basic | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""
+    case "$(printf '%s' "$rv" | tail -n1)" in 204|404) ;; *) printf 'revoke-failed %s\n' "$old" ;; esac
   fi
 }
 
 # Drops everything this plugin stored. Credentials from the environment are
 # not ours to remove.
 cmd_forget() {
-  rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"
+  wipe
 }
 
 main() {

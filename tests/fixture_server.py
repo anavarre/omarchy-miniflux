@@ -78,6 +78,12 @@ class Handler(BaseHTTPRequestHandler):
             log.write(json.dumps({"method": self.command, "mode": mode, "route": route,
                                   "query": query, "body": body, "seen": seen}) + "\n")
 
+        if self.command == "CONNECT":
+            # Refused, and the connection closed with it: curl resets a
+            # tunnel it could not open, which would otherwise show up as a
+            # traceback from the handler thread.
+            self.close_connection = True
+            return self.reply(405)
         if mode in ("big", "bigcl"):
             return self.reply(200, b"x" * (CAP + 1), length=(mode == "bigcl"))
         good = seen == {"token": KEY} or seen == {"user": USER, "password": PASSWORD}
@@ -123,7 +129,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(403 if mode == "nosave" else 202)
         return self.reply(404, b"404 page not found")
 
-    do_GET = do_POST = do_PUT = do_DELETE = handle_any
+    # CONNECT is what curl sends when the fixture is named as an https proxy;
+    # it is logged like any request (and refused), so a test can see that the
+    # proxy was consulted at all.
+    do_GET = do_POST = do_PUT = do_DELETE = do_CONNECT = handle_any
 
 
 class Server(ThreadingHTTPServer):

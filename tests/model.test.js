@@ -94,13 +94,32 @@ test("iconCommand rounds the id", () => {
   assert.deepEqual(plain(Model.iconCommand(script, 7.4)).slice(2), ["icon", "7"])
 })
 
+const b64 = (bytes) => Buffer.from(bytes).toString("base64")
+const magic = {
+  png: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+  jpeg: [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10],
+  gif: [0x47, 0x49, 0x46, 0x38, 0x39, 0x61],
+  bmp: [0x42, 0x4d, 0x00, 0x00],
+  ico: [0x00, 0x00, 0x01, 0x00, 0x01, 0x00],
+  webp: [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]
+}
+
+test("base64Head decodes only the bytes asked for", () => {
+  assert.deepEqual(plain(Model.base64Head("iVBORw0KGgo=", 12)), magic.png)
+  assert.deepEqual(plain(Model.base64Head("iVBORw0KGgo=", 3)), [0x89, 0x50, 0x4e])
+  assert.deepEqual(plain(Model.base64Head("", 4)), [])
+  assert.deepEqual(plain(Model.base64Head("AA==", 4)), [0])
+})
+
 test("parseIcon only builds base64 image data URLs", () => {
   const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
   assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "data:image/png;base64,iVBORw0KGgo=")
-  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,PHN2Zz4=")), "data:image/svg+xml;base64,PHN2Zz4=")
+  for (const kind of ["jpeg", "gif", "bmp", "webp"])
+    assert.equal(Model.parseIcon(icon(`image/${kind};base64,${b64(magic[kind])}`)), `data:image/${kind};base64,${b64(magic[kind])}`, kind)
+  assert.equal(Model.parseIcon(icon(`image/x-icon;base64,${b64(magic.ico)}`)), `data:image/x-icon;base64,${b64(magic.ico)}`)
+  // A favicon served under the wrong label is still a raster Qt can draw.
+  assert.equal(Model.parseIcon(icon(`image/x-icon;base64,${b64(magic.png)}`)), `data:image/x-icon;base64,${b64(magic.png)}`)
   assert.equal(Model.parseIcon(icon("text/html;base64,PGI+")), "")
-  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,H4sIAAAAAAAAA7PRtwEAAAAA")), "")
-  assert.equal(Model.parseIcon(icon("image/png;base64,H4sIAAAAAAAAA7PRtwEAAAAA")), "")
   assert.equal(Model.parseIcon(icon("image/tiff;base64,AAAA")), "")
   assert.equal(Model.parseIcon(icon("image/png,<svg>")), "")
   assert.equal(Model.parseIcon(icon("image/png;base64,AA==\nhttps://evil.example/")), "")
@@ -108,6 +127,32 @@ test("parseIcon only builds base64 image data URLs", () => {
   assert.equal(Model.parseIcon(icon("image/png;base64," + "A".repeat(600 * 1024))), "")
   assert.equal(Model.parseIcon("{}"), "")
   assert.equal(Model.parseIcon("<html>"), "")
+})
+
+test("parseIcon never lets a document reach the SVG decoder", () => {
+  const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
+  const svg = b64('<svg xmlns="http://www.w3.org/2000/svg"><image href="/etc/hostname"/></svg>')
+  // Declared as SVG, or as a raster Qt would sniff past.
+  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,PHN2Zz4=")), "")
+  assert.equal(Model.parseIcon(icon(`image/svg+xml;base64,${svg}`)), "")
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${svg}`)), "")
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64("<?xml version=\"1.0\"?><svg/>")}`)), "")
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64("﻿<svg/>")}`)), "")
+  // gzip (which Qt's SVG decoder would inflate first), under any label.
+  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,H4sIAAAAAAAAA7PRtwEAAAAA")), "")
+  assert.equal(Model.parseIcon(icon("image/png;base64,H4sIAAAAAAAAA7PRtwEAAAAA")), "")
+  // Too short to carry a signature.
+  assert.equal(Model.parseIcon(icon("image/png;base64,AA==")), "")
+})
+
+test("serverSettingsUrl points at the user's own instance", () => {
+  assert.equal(Model.serverSettingsUrl("https://rss.example.test"), "https://rss.example.test/settings")
+  assert.equal(Model.serverSettingsUrl("https://rss.example.test/"), "https://rss.example.test/settings")
+  assert.equal(Model.serverSettingsUrl("rss.example.test"), "https://rss.example.test/settings")
+  assert.equal(Model.serverSettingsUrl("http://localhost:8080"), "http://localhost:8080/settings")
+  assert.equal(Model.serverSettingsUrl(""), "")
+  assert.equal(Model.serverSettingsUrl(null), "")
+  assert.equal(Model.serverSettingsUrl("https:///"), "")
 })
 
 test("splitResponse takes the status from the last line", () => {

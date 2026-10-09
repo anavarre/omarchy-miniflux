@@ -109,6 +109,25 @@ for server in http://localhost:1 http://ann@localhost:1 http://127.0.0.1:1 'http
   expect_rc "lets $server through" 20 "${key[@]}" MINIFLUX_SERVER="$server" -- auth
 done
 
+# A proxy in the environment is honoured for https:// but never for the
+# loopback-only http:// case, where it would carry the cleartext request off
+# the machine. Port 1 is closed, so a request that went to that "proxy" fails;
+# the fixture named as the https proxy logs the CONNECT it is sent.
+run "${key[@]}" http_proxy=http://127.0.0.1:1 all_proxy=http://127.0.0.1:1 MINIFLUX_SERVER="$base" -- auth
+check "a proxy is bypassed for a loopback http server" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 200 ]
+expect_rc "a proxy is used for an https server" 20 "${key[@]}" https_proxy="$base" MINIFLUX_SERVER=https://m.example -- auth
+check "the https request went through the proxy" has "$(last_request)" '"method": "CONNECT"'
+
+# curl's URL globbing is off, so brackets or braces in a typed address make
+# one request for that literal path, not one per expansion.
+before=$(requests)
+run "${key[@]}" MINIFLUX_SERVER="$base/[1-3]" -- auth
+check "a bracketed address is one request" [ "$(requests)" -eq $((before + 1)) ]
+check "sent with the brackets intact" has "$(last_request)" '"route": "/[1-3]/v1/me"'
+before=$(requests)
+run "${key[@]}" MINIFLUX_SERVER="$base/{a,b}" -- auth
+check "a braced address is one request" [ "$(requests)" -eq $((before + 1)) ]
+
 # --- requests --------------------------------------------------------------
 run "${key[@]}" MINIFLUX_SERVER="$base" -- auth
 check "auth succeeds against the fixture" [ "$rc" -eq 0 ]
@@ -192,6 +211,20 @@ fresh
 input="$base/notoken"$'\nann\npw\n' expect_rc "a key answer without a token" 23 -- save
 check "reports the status of the key answer" [ "$err" = 201 ]
 check "a failed mint leaves no store behind" [ ! -e "$store" ]
+
+# A write that fails part-way must not leave the new server's config next to
+# the old server's secret. A directory where the token file goes makes the
+# rename fail after config has already been written.
+fresh
+input="$base"$'\nann\npw\n' run -- save
+check "signed in before the failing save" [ -s "$store/token" ]
+rm -f "$store/token"; mkdir "$store/token"
+input="$base/revokefail"$'\nann\npw\n' expect_rc "a save whose token write fails" 24 -- save
+check "says what could not be written" has "$err" "Could not write"
+check "the config is not left pointing at the new server" [ ! -e "$store/config" ]
+check "no password or key id is left either" [ ! -e "$store/password" ] && [ ! -e "$store/token-id" ]
+rmdir "$store/token"
+expect_rc "signed out after the failed save" 10 -- auth
 
 run "${key[@]}" MINIFLUX_SERVER="$base/nosave" -- save-entry 4
 check "save-entry passes a 403 through" [ "$rc" -eq 0 ] && [ "$(printf '%s' "$out" | tail -n1)" = 403 ]

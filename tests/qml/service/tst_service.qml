@@ -230,6 +230,29 @@ TestCase {
     compare(proc("auth").starts, 2)
   }
 
+  // The script reads three lines, so a line break pasted into a field must
+  // not shift what follows it onto the wrong line.
+  function test_signInKeepsOneValuePerLine() {
+    proc("auth").finish(10, "", "")
+    svc.signIn("https://rss.example.test\nhttps://other.example", "ann\r\nbob", "pw")
+    compare(proc("save").written, "https://rss.example.testhttps://other.example\nannbob\npw\n")
+    proc("save").finish(21, "401", "")
+    svc.signIn("https://rss.example.test", "ann", "pw\nmore")
+    compare(svc.saving, false, "a password with a line break is refused")
+    compare(proc("save").starts, 1)
+    verify(svc.authError.indexOf("line break") >= 0)
+  }
+
+  // Signed in, the stored address is loaded so the Settings link can point
+  // at this instance.
+  function test_signInLoadsConfig() {
+    proc("auth").finish(0, me(), "")
+    verify(proc("config").running, "config is loaded once signed in")
+    proc("config").finish(0, JSON.stringify({ server: "https://rss.example.test", username: "ann",
+      hasSecret: true, store: "~/.config/omarchy/miniflux" }) + "\n", "")
+    compare(svc.storedServer, "https://rss.example.test")
+  }
+
   function test_addFeedRefreshesOnSuccess() {
     signedIn([1], 1)
     svc.addFeed("  feed.example/rss ")
@@ -333,8 +356,9 @@ TestCase {
     return JSON.stringify({ total: pairs.length, entries: entries }) + "\n200\n"
   }
 
+  // A PNG header, since Model.parseIcon checks the bytes, not just the label.
   function icon(id) {
-    return JSON.stringify({ id: id, data: "image/png;base64,AAAA" }) + "\n200\n"
+    return JSON.stringify({ id: id, data: "image/png;base64,iVBORw0KGgo=" }) + "\n200\n"
   }
 
   function test_feedIconsAreOffByDefault() {
@@ -353,7 +377,7 @@ TestCase {
     tryCompare(p, "starts", 2)
     compare(p.command.slice(3), ["6"])
     p.finish(0, "\n404\n", "")
-    compare(svc.icons, { 5: "data:image/png;base64,AAAA", 6: "" })
+    compare(svc.icons, { 5: "data:image/png;base64,iVBORw0KGgo=", 6: "" })
     wait(0)
     compare(p.starts, 2, "entries without an icon, and repeats, are skipped")
 

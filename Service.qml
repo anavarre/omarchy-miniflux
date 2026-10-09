@@ -251,11 +251,24 @@ Item {
     root.iconQueue = []
   }
 
+  // The script reads the three values as three lines, so a line break inside
+  // one (pasted into a field) would shift the ones after it: the username
+  // would be read as the server's second line and the password as the
+  // username, which then gets written to the config file. CR and LF are
+  // dropped from the server and username; a password cannot be made of one
+  // line, so one that carries a line break is refused rather than cut short.
   function signIn(server, username, password) {
     if (root.saving || forgetProcess.running) return
+    var pass = String(password)
+    if (/[\r\n]/.test(pass)) {
+      root.authHint = ""
+      root.authError = "The password cannot contain a line break."
+      return
+    }
     root.saving = true
     root.clearAuthMessages()
-    saveProcess.payload = String(server).trim() + "\n" + String(username).trim() + "\n" + String(password) + "\n"
+    saveProcess.payload = String(server).replace(/[\r\n]/g, "").trim() + "\n"
+      + String(username).replace(/[\r\n]/g, "").trim() + "\n" + pass + "\n"
     saveProcess.command = Model.saveCommand(root.api)
     saveProcess.running = true
   }
@@ -722,6 +735,9 @@ Item {
       }
       root.authState = "ok"
       root.clearAuthMessages()
+      // The panel's Settings link to the web app points at this server, so
+      // its address has to be known while signed in, not only on the form.
+      root.loadConfig()
       root.refresh()
     }
   }

@@ -24,7 +24,9 @@ panel only passes it arguments, never shell code. It runs `/usr/bin/bash` on the
 environment: only `HOME`, `XDG_CONFIG_HOME`, the `MINIFLUX_*` variables below, the
 proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case forms)
 and the CA variables (`SSL_CERT_FILE`, `SSL_CERT_DIR`, `CURL_CA_BUNDLE`) are passed
-through. `~/.curlrc` is ignored. To debug a sign-in, run it yourself:
+through. `~/.curlrc` is ignored, URL globbing is off, and the proxy variables are
+ignored for a plain `http://` server, which is only ever loopback (see below), so the
+cleartext request can never be routed off the machine. To debug a sign-in, run it yourself:
 `bin/miniflux-api auth` prints the `/v1/me` answer and its HTTP status, or exits with
 one of the codes listed at the top of the script. Its error output is cut off after
 2 KiB, and the panel shows at most 200 characters of it.
@@ -50,7 +52,8 @@ Credentials live in `$XDG_CONFIG_HOME/omarchy/miniflux/` (`~/.config/omarchy/min
 by default) — a `config` file with the server and username, and `token` plus its
 `token-id` (or `password`) alongside it, all `0600` in a `0700` directory. Each file is
 written to a temporary name and renamed into place, so an interrupted save never leaves
-half a key behind. The plugin refuses a store that is a symlink or belongs to another
+half a key behind, and a save that fails part-way removes what it had written rather
+than leaving one server's address next to another's key. The plugin refuses a store that is a symlink or belongs to another
 user, rather than reading or writing through it. Signing in again on the same server mints a fresh key and then
 revokes the one it replaces. "Forget credentials" in the panel deletes the local files;
 the API key stays on the Miniflux side until you revoke it under Settings → API keys.
@@ -122,8 +125,11 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
 - **Feed icon on each entry** — off by default. On, every entry leads with its
   feed's icon, the one Miniflux already stores for it, fetched from your instance
   (never from the feed's own site) once per feed listed and dropped when the feed
-  leaves the list. A feed with no icon, or one Qt cannot draw, shows a dim RSS
-  glyph instead. Also in the panel's **Settings** section, as a switch.
+  leaves the list. Only raster icons are drawn (PNG, JPEG, GIF, WebP, BMP, ICO),
+  checked by their first bytes rather than their declared type; an SVG icon is a
+  document written by the feed's site, and Qt's SVG renderer would run it inside the
+  shell, so it is skipped. A feed with no icon, or one that is skipped, shows a dim
+  RSS glyph instead. Also in the panel's **Settings** section, as a switch.
 - **Oldest entries first** — off by default, so the most recent entries lead. On,
   the oldest lead instead. In `shell.json` this is `"sortOrder": "newest"` or
   `"oldest"`. Also in the panel's **Settings** section, as a switch.
@@ -132,6 +138,9 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   and entries in the chosen order. Only the entries fetched are grouped, so the
   entry limit still applies to the list as a whole. Also in **Settings**.
 - **Unread entries only** — off also lists entries you have already read.
+
+The arrow at the bottom left of the Settings section opens the settings page of
+your own instance in the browser, for everything the panel does not cover.
 
 ## How it runs
 
