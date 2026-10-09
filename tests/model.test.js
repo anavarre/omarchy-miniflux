@@ -104,13 +104,13 @@ const magic = {
   webp: [0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]
 }
 
-const chunk = (type, len) => {
+const chunk = (type, len = 4) => {
   const head = Buffer.alloc(8)
-  head.writeUInt32BE(len, 0)
+  head.writeUInt32BE(type === "IHDR" ? 13 : len, 0)
   head.write(type, 4, "latin1")
-  return Buffer.concat([head, Buffer.alloc(len), Buffer.alloc(4)])
+  return Buffer.concat([head, Buffer.alloc(type === "IHDR" ? 13 : len, type === "IHDR" ? 0 : 7), Buffer.alloc(4)])
 }
-const png = (...types) => Buffer.concat([Buffer.from(magic.png), ...types.map((t) => chunk(t, 4))])
+const png = (...types) => Buffer.concat([Buffer.from(magic.png), ...types.map((t) => chunk(t))])
 
 test("base64Head decodes only the bytes asked for", () => {
   assert.deepEqual(plain(Model.base64Head("iVBORw0KGgo=", 12)), magic.png)
@@ -123,10 +123,21 @@ test("parseIcon only builds base64 image data URLs", () => {
   const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
   const plainPng = b64(png("IHDR", "IDAT", "IEND"))
   assert.equal(Model.parseIcon(icon(`image/png;base64,${plainPng}`)), `data:image/png;base64,${plainPng}`)
-  // Qt inflates and keeps text and profile chunks before any size limit applies.
+  // Qt inflates and keeps text and profile chunks before any size limit applies,
+  // so they are cut out and the rest of the image is kept, under any label.
   for (const bad of ["zTXt", "iTXt", "tEXt", "iCCP", "eXIf", "abCD"])
-    assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(png("IHDR", bad, "IDAT", "IEND"))}`)), "", bad)
+    for (const kind of ["png", "x-icon"])
+      assert.equal(Model.parseIcon(icon(`image/${kind};base64,${b64(png("IHDR", bad, "IDAT", bad, "IEND"))}`)),
+        `data:image/${kind};base64,${plainPng}`, bad)
+  // Not a well-formed PNG: no IEND, no leading IHDR, a chunk past the end, too large.
   assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(png("IHDR", "IDAT"))}`)), "")
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(png("IDAT", "IEND"))}`)), "")
+  const cut = png("IHDR", "IDAT", "IEND"), long = Buffer.from(cut)
+  long.writeUInt32BE(1 << 24, 33)
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(long)}`)), "")
+  const wide = Buffer.from(cut)
+  wide.writeUInt32BE(5000, 16)
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${b64(wide)}`)), "")
   assert.equal(Model.parseIcon(icon("image/png;base64,iVBORw0KGgo=")), "")
   for (const kind of ["jpeg", "gif", "bmp", "webp"])
     assert.equal(Model.parseIcon(icon(`image/${kind};base64,${b64(magic[kind])}`)), `data:image/${kind};base64,${b64(magic[kind])}`, kind)
@@ -143,13 +154,25 @@ test("parseIcon only builds base64 image data URLs", () => {
   assert.equal(Model.parseIcon("<html>"), "")
 })
 
-test("parseIcon never lets a document reach the SVG decoder", () => {
+test("parseIcon lets only a plain drawing reach the SVG decoder", () => {
   const icon = (data) => JSON.stringify({ id: 1, data: data, mime_type: "x" })
   const svg = b64('<svg xmlns="http://www.w3.org/2000/svg"><image href="/etc/hostname"/></svg>')
+  const okText = '<svg height="18" viewBox="0 0 9 9" width="18" xmlns="http://www.w3.org/2000/svg"><path d="m0 0h9v9h-9z" fill="#f60"/></svg>'
+  const okSvg = b64(okText)
+  // A plain drawing is the one SVG that is shown.
+  assert.equal(Model.parseIcon(icon(`image/svg+xml;base64,${okSvg}`)), `data:image/svg+xml;base64,${okSvg}`)
+  assert.equal(Model.parseIcon(icon(`image/svg+xml;base64,${b64('<?xml version="1.0"?>\n' + okText)}`)).startsWith("data:"), true)
   // Declared as SVG, or as a raster Qt would sniff past.
-  assert.equal(Model.parseIcon(icon("image/svg+xml;base64,PHN2Zz4=")), "")
   assert.equal(Model.parseIcon(icon(`image/svg+xml;base64,${svg}`)), "")
   assert.equal(Model.parseIcon(icon(`image/png;base64,${svg}`)), "")
+  assert.equal(Model.parseIcon(icon(`image/png;base64,${okSvg}`)), "")
+  // Anything beyond shapes, even inside an otherwise plain drawing.
+  for (const bad of [
+    '<svg><script>x</script></svg>', '<svg><style>*{}</style></svg>', '<svg><use href="#a"/></svg>',
+    '<svg><foreignObject/></svg>', '<svg><path fill="url(#a)"/></svg>', '<svg onload="x()"/>',
+    '<!DOCTYPE svg [<!ENTITY a "b">]><svg/>', '<svg><!-- c --></svg>', '<svg>&a;</svg>',
+    '<svg><animate/></svg>', '<svg/>\u00e9', "x" + okText, '<svg>' + " ".repeat(9000) + '</svg>'
+  ]) assert.equal(Model.parseIcon(icon(`image/svg+xml;base64,${b64(bad)}`)), "", bad.slice(0, 30))
   assert.equal(Model.parseIcon(icon(`image/png;base64,${b64("<?xml version=\"1.0\"?><svg/>")}`)), "")
   assert.equal(Model.parseIcon(icon(`image/png;base64,${b64("﻿<svg/>")}`)), "")
   // gzip (which Qt's SVG decoder would inflate first), under any label.

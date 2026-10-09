@@ -358,7 +358,7 @@ TestCase {
 
   // A PNG header, since Model.parseIcon checks the bytes, not just the label.
   function icon(id) {
-    return JSON.stringify({ id: id, data: "image/png;base64,iVBORw0KGgoAAAAESUhEUgAAAAAAAAAAAAAABElEQVQAAAAAAAAAAAAAAARJRU5EAAAAAAAAAAA=" }) + "\n200\n"
+    return JSON.stringify({ id: id, data: "image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==" }) + "\n200\n"
   }
 
   function test_feedIconsAreOffByDefault() {
@@ -377,7 +377,7 @@ TestCase {
     tryCompare(p, "starts", 2)
     compare(p.command.slice(3), ["6"])
     p.finish(0, "\n404\n", "")
-    compare(svc.icons, { 5: "data:image/png;base64,iVBORw0KGgoAAAAESUhEUgAAAAAAAAAAAAAABElEQVQAAAAAAAAAAAAAAARJRU5EAAAAAAAAAAA=", 6: "" })
+    compare(svc.icons, { 5: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNgAAAAAgABSK+kcQAAAABJRU5ErkJggg==", 6: "" })
     wait(0)
     compare(p.starts, 2, "entries without an icon, and repeats, are skipped")
 

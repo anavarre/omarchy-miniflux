@@ -151,13 +151,19 @@ function iconCommand(script, id) {
 // Raster formats Qt's image readers handle. An icon in anything else is
 // skipped, so its row shows the placeholder rather than a broken image.
 //
-// SVG is deliberately not among them. Qt's SVG decoder runs in the shell's
-// own process on a document the feed's site wrote: its <image href> loads
-// whatever local file path it names and paints it into the icon, it inflates
-// gzip before any size limit applies, and the parser itself is a far larger
-// surface than a PNG decoder. A feed whose icon is an SVG shows the
-// placeholder glyph instead.
-var iconTypes = ["png", "jpeg", "gif", "webp", "bmp", "x-icon", "vnd.microsoft.icon"]
+// SVG is allowed only as a plain drawing (see isPlainSvg). Qt's SVG decoder
+// runs in the shell's own process on a document the feed's site wrote: its
+// <image href> loads whatever local file path it names and paints it into the
+// icon, it inflates gzip before any size limit applies, and the parser itself
+// is a far larger surface than a PNG decoder. An SVG that is anything more
+// than shapes shows the placeholder glyph instead.
+var iconTypes = ["png", "jpeg", "gif", "webp", "bmp", "x-icon", "vnd.microsoft.icon", "svg+xml"]
+// Small drawings only; a real icon SVG is well under this.
+var svgMaxChars = 8 * 1024
+// Elements a plain icon needs. Anything else (image, use, script, style,
+// foreignObject, animation, filters, ...) rejects the icon.
+var svgTags = ["svg", "g", "defs", "title", "desc", "path", "rect", "circle", "ellipse",
+               "line", "polyline", "polygon", "linearGradient", "radialGradient", "stop", "clipPath"]
 // A favicon is a few KiB; anything past this is not worth holding in memory
 // once per listed feed.
 var iconMaxChars = 512 * 1024
@@ -198,13 +204,15 @@ function base64Head(s, count) {
   return out
 }
 
-// Chunks a PNG icon may carry. Qt's PNG reader inflates every text chunk
+// Chunks a PNG icon may keep. Qt's PNG reader inflates every text chunk
 // (tEXt, zTXt, iTXt) and the ICC profile into strings it keeps, before any
 // pixel-size limit applies, so a small file can cost hundreds of MiB. Only
-// the chunks needed to draw the image are allowed; anything else, including
-// unknown ancillary chunks, rejects the icon.
+// the chunks needed to draw the image are copied; everything else, including
+// unknown ancillary chunks, is dropped (see cleanPng).
 var pngChunks = ["IHDR", "PLTE", "IDAT", "IEND", "tRNS", "gAMA", "cHRM", "sRGB",
                  "sBIT", "bKGD", "pHYs", "acTL", "fcTL", "fdAT"]
+// Largest icon, per side, worth decoding; a favicon is a few dozen pixels.
+var pngMaxSide = 1024
 
 function base64Bytes(s) {
   var out = []
@@ -222,19 +230,67 @@ function base64Bytes(s) {
   return out
 }
 
-// True when the bytes are a well-formed chain of allowed PNG chunks.
-function isPlainPng(b) {
-  if (b.length < 8 + 12) return false
-  var pos = 8
-  var sawEnd = false
-  while (pos + 12 <= b.length) {
-    var len = b[pos] * 16777216 + (b[pos + 1] << 16) + (b[pos + 2] << 8) + b[pos + 3]
-    var type = String.fromCharCode(b[pos + 4], b[pos + 5], b[pos + 6], b[pos + 7])
-    if (pngChunks.indexOf(type) < 0) return false
-    pos += 12 + len
-    if (type === "IEND") { sawEnd = true; break }
+function base64Encode(b) {
+  var out = ""
+  for (var i = 0; i < b.length; i += 3) {
+    var n = (b[i] << 16) | ((i + 1 < b.length ? b[i + 1] : 0) << 8) | (i + 2 < b.length ? b[i + 2] : 0)
+    out += base64Alphabet.charAt((n >> 18) & 63) + base64Alphabet.charAt((n >> 12) & 63)
+      + (i + 1 < b.length ? base64Alphabet.charAt((n >> 6) & 63) : "=")
+      + (i + 2 < b.length ? base64Alphabet.charAt(n & 63) : "=")
   }
-  return sawEnd
+  return out
+}
+
+function u32(b, pos) {
+  return b[pos] * 16777216 + (b[pos + 1] << 16) + (b[pos + 2] << 8) + b[pos + 3]
+}
+
+// The PNG's bytes with every chunk outside pngChunks removed, or null when
+// it is not a well-formed PNG (IHDR first, IEND last, every chunk inside the
+// data, a sane size). Each chunk carries its own CRC, so copying whole
+// chunks keeps the file valid.
+function cleanPng(b) {
+  if (b.length < 8 + 12) return null
+  var out = b.slice(0, 8)
+  var pos = 8
+  var first = true
+  while (pos + 12 <= b.length) {
+    var len = u32(b, pos)
+    var type = String.fromCharCode(b[pos + 4], b[pos + 5], b[pos + 6], b[pos + 7])
+    if (pos + 12 + len > b.length) return null
+    if (first) {
+      if (type !== "IHDR" || len !== 13) return null
+      if (u32(b, pos + 8) > pngMaxSide || u32(b, pos + 12) > pngMaxSide) return null
+      first = false
+    }
+    if (pngChunks.indexOf(type) >= 0) out = out.concat(b.slice(pos, pos + 12 + len))
+    pos += 12 + len
+    if (type === "IEND") return out
+  }
+  return null
+}
+
+// True when the payload is a plain SVG drawing: ASCII text that starts as an
+// SVG document, uses only the elements above, and has no reference of any
+// kind (href, url(), entities, DOCTYPE, CDATA, comments, event attributes).
+function isPlainSvg(b64) {
+  if (b64.length > svgMaxChars * 4 / 3 + 4) return false
+  var bytes = base64Bytes(b64)
+  var t = ""
+  for (var i = 0; i < bytes.length; i++) {
+    var c = bytes[i]
+    if (c > 0x7e || (c < 0x20 && c !== 0x09 && c !== 0x0a && c !== 0x0d)) return false
+    t += String.fromCharCode(c)
+  }
+  if (t.length > svgMaxChars) return false
+  t = t.replace(/^<\?xml[^>]*\?>\s*/, "")
+  if (!/^<svg[\s>]/.test(t)) return false
+  if (/<!|&|href|url\s*\(|\bon[a-z]+\s*=|<\?|@import|javascript:/i.test(t)) return false
+  var tag = /<\/?([A-Za-z][A-Za-z0-9]*)/g
+  var m
+  while ((m = tag.exec(t)) !== null)
+    if (svgTags.indexOf(m[1]) < 0) return false
+  return true
 }
 
 // The icon as a data: URL for an Image, or "" when it is not one we can show.
@@ -252,9 +308,14 @@ function parseIcon(body) {
   if (data.length > iconMaxChars) return ""
   var m = /^image\/([a-z0-9.+-]+);base64,([A-Za-z0-9+\/]+={0,2})$/.exec(data)
   if (!m || iconTypes.indexOf(m[1]) < 0) return ""
+  if (m[1] === "svg+xml") return isPlainSvg(m[2]) ? "data:" + data : ""
   var head = base64Head(m[2], 12)
   if (!isRasterMagic(head)) return ""
-  if (head[0] === 0x89 && !isPlainPng(base64Bytes(m[2]))) return ""
+  if (head[0] === 0x89) {
+    var png = cleanPng(base64Bytes(m[2]))
+    if (png === null) return ""
+    return "data:image/" + m[1] + ";base64," + base64Encode(png)
+  }
   return "data:" + data
 }
 

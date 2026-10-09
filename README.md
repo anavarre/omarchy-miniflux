@@ -125,16 +125,19 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
 - **Feed icon on each entry** — off by default. On, every entry leads with its
   feed's icon, the one Miniflux already stores for it, fetched from your instance
   (never from the feed's own site) once per feed listed and dropped when the feed
-  leaves the list. Only raster icons are drawn (PNG, JPEG, GIF, WebP, BMP, ICO),
-  checked by their first bytes rather than their declared type; an SVG icon is a
-  document written by the feed's site, and Qt's SVG renderer would run it inside the
-  shell, so it is skipped. A feed with no icon, or one that is skipped, shows a dim
+  leaves the list. Raster icons (PNG, JPEG, GIF, WebP, BMP, ICO) are checked by their
+  first bytes rather than their declared type. A PNG is rewritten with only its
+  drawing chunks (text, ICC profile and unknown chunks are cut out) and skipped if
+  malformed or larger than 1024 pixels a side. An SVG icon is a document written by the feed's site and
+  Qt's SVG renderer would run it inside the shell, so only a small plain drawing is
+  shown (shapes and gradients: no images, links, styles, scripts, entities or
+  animation); any other SVG is skipped. A feed with no icon, or one that is skipped, shows a dim
   RSS glyph instead. Also in the panel's **Settings** section, as a switch.
 - **Oldest entries first** — off by default, so the most recent entries lead. On,
   the oldest lead instead. In `shell.json` this is `"sortOrder": "newest"` or
   `"oldest"`. Also in the panel's **Settings** section, as a switch.
 - **Group entries by feed** — off by default. On, each feed's entries are listed
-  together under the feed's name, feeds in the order they first appear in the list
+  together (the feed's name follows the age on every row instead of a header), feeds in the order they first appear in the list
   and entries in the chosen order. Only the entries fetched are grouped, so the
   entry limit still applies to the list as a whole. Also in **Settings**.
 - **Unread entries only** — off also lists entries you have already read.

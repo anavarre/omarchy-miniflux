@@ -952,25 +952,8 @@ Panel {
                   id: group
                   required property int index
                   required property var modelData
-                  readonly property bool startsGroup: root.groupByFeed
-                    && (group.index === 0 || root.entries[group.index - 1].feedId !== group.modelData.feedId
-                      || root.entries[group.index - 1].feed !== group.modelData.feed)
                   width: parent.width
                   spacing: Style.space(2)
-
-                  Text {
-                    width: parent.width
-                    visible: group.startsGroup
-                    height: visible ? implicitHeight + Style.space(4) : 0
-                    verticalAlignment: Text.AlignBottom
-                    textFormat: Text.PlainText
-                    text: group.modelData.feed !== "" ? group.modelData.feed : "Unknown feed"
-                    color: root.dim
-                    font.family: root.fontFamily
-                    font.pixelSize: root.fs(Style.font.caption)
-                    font.bold: true
-                    elide: Text.ElideRight
-                  }
 
                   Rectangle {
                     id: entryRow
@@ -1086,7 +1069,8 @@ Panel {
                         Text {
                           width: parent.width
                           textFormat: Text.PlainText
-                          text: [root.groupByFeed ? "" : entryRow.modelData.feed, Model.formatAge(entryRow.modelData.published)]
+                          text: [root.groupByFeed ? Model.formatAge(entryRow.modelData.published) : entryRow.modelData.feed,
+                            root.groupByFeed ? entryRow.modelData.feed : Model.formatAge(entryRow.modelData.published)]
                             .filter(function(v) { return v !== "" }).join(" · ")
                           color: root.dim
                           font.family: root.fontFamily
