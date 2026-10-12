@@ -415,9 +415,9 @@ function totalEntries(body) {
   }
 }
 
-// Relative for anything from the last few days, absolute after that — a feed
-// list is read by how fresh an item is, not by its exact timestamp. Qt helpers
-// are not reliable in a .pragma library, so this is plain JS.
+// Always relative — a feed list is read by how fresh an item is, not by its
+// exact timestamp. Qt helpers are not reliable in a .pragma library, so this is
+// plain JS.
 function formatAge(value) {
   if (!value) return ""
   var then = new Date(value)
@@ -428,12 +428,12 @@ function formatAge(value) {
   var hours = Math.round(mins / 60)
   if (hours < 24) return hours + "h ago"
   var days = Math.round(hours / 24)
-  if (days <= 6) return days + "d ago"
-  return then.getFullYear() + "-" + pad(then.getMonth() + 1) + "-" + pad(then.getDate())
-}
-
-function pad(n) {
-  return n < 10 ? "0" + n : String(n)
+  if (days < 7) return days + "d ago"
+  var weeks = Math.round(days / 7)
+  if (days < 30) return weeks + "w ago"
+  var months = Math.round(days / 30)
+  if (days < 365) return Math.min(months, 11) + "mo ago"
+  return Math.max(Math.round(days / 365), 1) + "y ago"
 }
 
 // Titles arrive as feed text, which may carry entities the feed author left in.

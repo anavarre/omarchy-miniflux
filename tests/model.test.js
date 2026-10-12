@@ -231,7 +231,7 @@ test("totalEntries never throws", () => {
   assert.equal(Model.totalEntries("<html>"), 0)
 })
 
-test("formatAge is relative for a week, then a date", () => {
+test("formatAge is always relative", () => {
   const ago = (ms) => new Date(Date.now() - ms).toISOString()
   const minute = 60000
   assert.equal(Model.formatAge(""), "")
@@ -240,10 +240,10 @@ test("formatAge is relative for a week, then a date", () => {
   assert.equal(Model.formatAge(ago(5 * minute)), "5m ago")
   assert.equal(Model.formatAge(ago(3 * 60 * minute)), "3h ago")
   assert.equal(Model.formatAge(ago(2 * 24 * 60 * minute)), "2d ago")
-  const old = new Date(Date.now() - 30 * 24 * 60 * minute)
-  const pad = (n) => String(n).padStart(2, "0")
-  assert.equal(Model.formatAge(old.toISOString()),
-    `${old.getFullYear()}-${pad(old.getMonth() + 1)}-${pad(old.getDate())}`)
+  const day = 24 * 60 * minute
+  assert.equal(Model.formatAge(ago(14 * day)), "2w ago")
+  assert.equal(Model.formatAge(ago(60 * day)), "2mo ago")
+  assert.equal(Model.formatAge(ago(800 * day)), "2y ago")
 })
 
 test("decodeTitle decodes entities once", () => {
