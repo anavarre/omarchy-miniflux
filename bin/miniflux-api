@@ -17,6 +17,9 @@
 #                        the secret)
 #   save                 read server, username and password from stdin, one
 #                        per line, verify them and store an API key
+#   seen                 print the highest entry id the user has seen (0 when
+#                        none is on file)
+#   seen-set ID          record that id as the highest seen; never lowers it
 #   forget               delete everything this plugin stored
 #
 # Miniflux REST API: https://miniflux.app/docs/api.html
@@ -73,7 +76,7 @@ put() {
   if printf '%s' "$2" > "$t" && chmod 600 "$t" && mv -f "$t" "$store/$1"; then return 0; fi
   rm -f "$t"; printf 'Could not write %s.\n' "$store/$1" >&2; return 1
 }
-wipe() { rm -f "$store/config" "$store/token" "$store/token-id" "$store/password"; }
+wipe() { rm -f "$store/config" "$store/token" "$store/token-id" "$store/password" "$store/seen"; }
 
 # Basic auth and X-Auth-Token are both cleartext on the wire, so a plain
 # http:// server is refused unless it is loopback, where nothing leaves the
@@ -325,11 +328,34 @@ cmd_save() {
       rm -f "$store/token" "$store/token-id"
     fi
   }
+  [ "$oldserver" = "$server" ] || rm -f "$store/seen"
   store_all || { wipe; exit 24; }
   if [ -n "$tok" ] && [ -n "$old" ] && [ "$old" != "$kid" ] && [ "$oldserver" = "$server" ]; then
     rv=$(basic | fetch -X DELETE "$server/v1/api-keys/$old" 2>/dev/null) || rv=""
     case "$(printf '%s' "$rv" | tail -n1)" in 204|404) ;; *) printf 'revoke-failed %s\n' "$old" ;; esac
   fi
+}
+
+# The newest entry id the bar's new-entry dot has accounted for, kept so a
+# restart can tell what arrived while the shell was not running. Miniflux ids
+# only grow, so one number is enough, and it only ever moves up. Needs no
+# credentials and no network.
+cmd_seen() {
+  local n=0
+  [ -r "$store/seen" ] && n=$(head -n1 "$store/seen" | tr -cd '0-9')
+  printf '%s\n' "${n:-0}"
+}
+
+cmd_seen_set() {
+  [ "$#" -eq 1 ] || usage "seen-set ID"
+  number "$1"
+  local old
+  old=$(cmd_seen)
+  [ "$1" -gt "$old" ] || return 0
+  umask 077
+  if ! { mkdir -p "$store" && chmod 700 "$store"; }; then printf 'Could not create %s.\n' "$store" >&2; exit 24; fi
+  unsafe && exit 24
+  put seen "$1" || exit 24
 }
 
 # Drops everything this plugin stored. Credentials from the environment are
@@ -351,6 +377,8 @@ main() {
     add-feed) cmd_add_feed "$@" ;;
     config) cmd_config "$@" ;;
     save) cmd_save "$@" ;;
+    seen) cmd_seen "$@" ;;
+    seen-set) cmd_seen_set "$@" ;;
     forget) cmd_forget "$@" ;;
     *) usage "unknown command: $command" ;;
   esac

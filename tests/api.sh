@@ -194,6 +194,17 @@ check "revokes the key it replaced" has "$(last_request)" '"method": "DELETE", "
 check "stores the new key id" [ "$(cat "$store/token-id")" = 8 ]
 check "reports no leftover key" [ -z "$out" ]
 
+expect_rc "seen starts at zero" 0 -- seen
+check "reports 0 with nothing on file" [ "$out" = 0 ]
+expect_rc "seen-set records an id" 0 -- seen-set 120
+run -- seen
+check "reads it back" [ "$out" = 120 ]
+expect_rc "seen-set never lowers it" 0 -- seen-set 5
+run -- seen
+check "still 120" [ "$out" = 120 ]
+expect_rc "seen-set refuses a non-number" 64 -- seen-set abc
+check "the seen file is 0600" [ "$(mode "$store/seen")" = 600 ]
+
 expect_rc "forget" 0 -- forget
 check "forget removes every file" [ -z "$(ls -A "$store")" ]
 expect_rc "signed out after forget" 10 -- auth

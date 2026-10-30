@@ -25,6 +25,11 @@ test("commands run the script under /usr/bin/bash", () => {
   assert.deepEqual(plain(Model.configCommand(script)), ["/usr/bin/bash", script, "config"])
   assert.deepEqual(plain(Model.saveCommand(script)), ["/usr/bin/bash", script, "save"])
   assert.deepEqual(plain(Model.forgetCommand(script)), ["/usr/bin/bash", script, "forget"])
+  assert.deepEqual(plain(Model.seenCommand(script)), ["/usr/bin/bash", script, "seen"])
+  assert.deepEqual(plain(Model.seenSetCommand(script, 42)), ["/usr/bin/bash", script, "seen-set", "42"])
+  assert.equal(Model.parseSeen("120\n"), 120)
+  assert.equal(Model.parseSeen(""), 0)
+  assert.equal(Model.parseSeen("junk"), 0)
 })
 
 test("the environment pins PATH and passes nothing else by value", () => {

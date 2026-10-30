@@ -344,6 +344,21 @@ function saveCommand(script) {
   return [bash, script, "save"]
 }
 
+// The highest entry id the new-entry dot has accounted for, kept across
+// restarts: read as a bare number, and raised (never lowered) by seenSetCommand.
+function seenCommand(script) {
+  return [bash, script, "seen"]
+}
+
+function seenSetCommand(script, id) {
+  return [bash, script, "seen-set", String(Math.round(Number(id)))]
+}
+
+function parseSeen(stdout) {
+  var n = parseInt(text(stdout).trim(), 10)
+  return isFinite(n) && n > 0 ? n : 0
+}
+
 // Drops everything this plugin stored.
 function forgetCommand(script) {
   return [bash, script, "forget"]

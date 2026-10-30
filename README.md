@@ -19,7 +19,7 @@ omarchy bar move anavarre.miniflux --section right
 Requires `curl` and `bash`, both of which Omarchy already has.
 
 Every request goes through `bin/miniflux-api`, one script with a subcommand per
-request (`auth`, `entries`, `mark`, `save-entry`, `icon`, `config`, `save`, `forget`); the
+request (`auth`, `entries`, `mark`, `save-entry`, `icon`, `config`, `save`, `seen`, `seen-set`, `forget`); the
 panel only passes it arguments, never shell code. It runs `/usr/bin/bash` on the script with `PATH` fixed to `/usr/bin:/bin` and a scrubbed
 environment: only `HOME`, `XDG_CONFIG_HOME`, the `MINIFLUX_*` variables below, the
 proxy variables (`https_proxy`, `all_proxy`, `no_proxy` and their upper-case forms)
@@ -108,8 +108,11 @@ In the plugin's settings (Omarchy's plugin picker, or its entry in `~/.config/om
   size redraws the panel at that size straight away.
 - **Mark new entries on the bar** — on by default. When a background refresh
   turns up entries that were not in the previous list, a dot appears on the bar
-  icon; opening the panel clears it. The first fetch after signing in only sets
-  the baseline, so it never starts out dotted. Also in the panel's **Settings**
+  icon; opening the panel clears it. The newest entry id you have seen is kept in
+  the plugin's store (a `seen` file), so entries that arrived while the shell
+  was not running dot the icon after the first fetch at startup. With nothing
+  on file (first sign-in), the first fetch only sets the baseline, so it never
+  starts out dotted. Also in the panel's **Settings**
   section, as a switch.
 - **Save button on each entry** — on by default: every entry carries a bookmark,
   left of the mark-read check, that saves it to your Miniflux save integration.

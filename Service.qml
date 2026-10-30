@@ -123,6 +123,13 @@ Item {
   // bound. Null until the first fetch lands — that one only sets the baseline,
   // so signing in does not immediately claim everything is new.
   property var seenIds: null
+  // Highest entry id already accounted for, kept in the store so a restart can
+  // tell what arrived while the shell was off. -1 until read, 0 when nothing is
+  // on file (then the first fetch is only a baseline). Miniflux ids only grow,
+  // so an entry above it was created since.
+  property double storedSeen: -1
+  property double seenWanted: 0
+  property double seenWritten: 0
   // How many monitors currently show the panel.
   property int openPanels: 0
 
@@ -176,12 +183,34 @@ Item {
   function noteEntries(list) {
     var seen = {}
     var fresh = false
+    var top = 0
+    var first = root.seenIds === null
     for (var i = 0; i < list.length; i++) {
-      seen[list[i].id] = true
-      if (root.seenIds !== null && !root.seenIds[list[i].id]) fresh = true
+      var id = list[i].id
+      seen[id] = true
+      if (id > top) top = id
+      if (!first && !root.seenIds[id]) fresh = true
+      // First fetch of this run: compare with what the last run had seen.
+      if (first && root.storedSeen > 0 && id > root.storedSeen) fresh = true
     }
     root.seenIds = seen
     if (fresh && root.openPanels === 0) root.hasNewEntries = true
+    if (!root.hasNewEntries) root.rememberSeen(top)
+  }
+
+  // Raises the stored high-water mark. Writes are serialised, and a value
+  // that arrives while one is out is sent when it returns.
+  function rememberSeen(id) {
+    if (id <= root.seenWanted || root.storedSeen < 0) return
+    root.seenWanted = id
+    root.flushSeen()
+  }
+
+  function flushSeen() {
+    if (seenSetProcess.running || root.seenWanted <= root.seenWritten) return
+    seenSetProcess.value = root.seenWanted
+    seenSetProcess.command = Model.seenSetCommand(root.api, root.seenWanted)
+    seenSetProcess.running = true
   }
 
   function clearNewEntries() {
@@ -189,6 +218,9 @@ Item {
     var seen = {}
     for (var i = 0; i < root.entries.length; i++) seen[root.entries[i].id] = true
     root.seenIds = seen
+    var top = 0
+    for (var id in seen) if (Number(id) > top) top = Number(id)
+    root.rememberSeen(top)
   }
 
   // Tries again later instead of reporting a dead end: the next attempt is
@@ -447,7 +479,11 @@ Item {
 
   // Sign-in is checked once at load, so the refresh timer and the bar's
   // new-entry dot work before any panel has been opened.
-  Component.onCompleted: root.checkAuth()
+  Component.onCompleted: {
+    seenProcess.command = Model.seenCommand(root.api)
+    seenProcess.running = true
+    root.checkAuth()
+  }
 
   // When the last IPC refresh went out. A hotkey held down or a script in a
   // loop would otherwise turn into one request per call; the panel's own "r"
@@ -549,6 +585,38 @@ Item {
         return
       }
       root.errorText = Model.saveEntryMessage(saveEntryStderr.text, exitCode, response.status)
+    }
+  }
+
+  // The high-water mark is read once at load, long before the first fetch can
+  // land (that waits on the sign-in check). If it fails, 0 is as good as no
+  // file: the first fetch is a baseline and nothing is claimed new.
+  Process {
+    id: seenProcess
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    stdout: StdioCollector { id: seenStdout; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.storedSeen = exitCode === 0 ? Model.parseSeen(seenStdout.text) : 0
+      root.seenWritten = root.storedSeen
+      root.seenWanted = root.storedSeen
+    }
+  }
+
+  Process {
+    id: seenSetProcess
+    property double value: 0
+    running: false
+    command: []
+    clearEnvironment: true
+    environment: Model.environment
+    onExited: function(exitCode) {
+      // A failed write is retried by the next one; the mark is a convenience.
+      if (exitCode === 0) root.seenWritten = seenSetProcess.value
+      else root.seenWanted = root.seenWritten
+      Qt.callLater(root.flushSeen)
     }
   }
 
@@ -678,6 +746,9 @@ Item {
       root.entries = []
       root.seenIds = null
       root.hasNewEntries = false
+      root.storedSeen = 0
+      root.seenWanted = 0
+      root.seenWritten = 0
       root.total = 0
       root.account = ""
       root.authState = "unknown"

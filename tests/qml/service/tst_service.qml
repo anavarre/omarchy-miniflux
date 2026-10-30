@@ -304,6 +304,29 @@ TestCase {
     svc.panelClosed()
   }
 
+  function test_newEntriesSinceLastRun() {
+    proc("seen").finish(0, "2\n", "")
+    compare(svc.storedSeen, 2)
+    signedIn([3, 2, 1], 3)
+    compare(svc.hasNewEntries, true, "entry 3 arrived while the shell was off")
+    verify(proc("seen-set") === null, "unseen entries are not recorded as seen")
+    svc.panelOpened()
+    compare(svc.hasNewEntries, false)
+    var write = proc("seen-set")
+    verify(write.running)
+    compare(write.command[3], "3")
+    write.finish(0, "", "")
+    compare(svc.seenWritten, 3)
+    svc.panelClosed()
+  }
+
+  function test_noStoredMarkIsOnlyABaseline() {
+    proc("seen").finish(0, "0\n", "")
+    signedIn([3, 2, 1], 3)
+    compare(svc.hasNewEntries, false)
+    compare(proc("seen-set").command[3], "3", "the baseline is recorded")
+  }
+
   function test_closingLastPanelDropsPlainNotice() {
     svc.panelOpened()
     svc.panelOpened()
