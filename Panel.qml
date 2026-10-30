@@ -219,10 +219,13 @@ Panel {
   }
 
   // Colours come from the theme: foreground and urgent from the bar (the
-  // palette when there is none), muted and accent from the palette, and the
+  // palette when there is none), accent from the palette, dim derived from the
+  // foreground so it contrasts on every theme, and the
   // row highlight from Style's hover fill so a theme's state styling applies.
   readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color dim: Color.muted
+  // Derived from the foreground rather than Color.muted, which some themes
+  // (hackerman) set barely lighter than the background.
+  readonly property color dim: Qt.alpha(root.foreground, 0.66)
   readonly property color accent: Color.accent
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
