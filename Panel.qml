@@ -233,10 +233,25 @@ Panel {
   // The card grows with the text, so a larger size means fewer wrapped titles
   // rather than the same column set in bigger type.
   readonly property real cardWidth: panel.fittedContentWidth(Style.space(Math.round(460 * root.textScale)))
-  // The list gets whatever the screen leaves once the header, the footer and
-  // the card's own padding are taken out.
-  readonly property real maxListHeight: Math.max(Style.space(120),
-    panel.cappedContentHeight(Style.space(560)) - panel.verticalContentInset - Style.space(80))
+  // The list gets whatever the screen leaves once the card's padding and
+  // everything else in the list view (heading, notices, footer) are taken
+  // out, so the card grows with the entry count the user picked and stops at
+  // the edge of the display. Measured rather than guessed, so a larger text
+  // size or a wrapped error never pushes the card off-screen.
+  readonly property real listChrome: {
+    var total = 0, count = 0
+    var kids = listViewColumn.children
+    for (var i = 0; i < kids.length; i++) {
+      var k = kids[i]
+      if (k === listView || !k.visible) continue
+      total += k.height
+      count++
+    }
+    // The Flickable itself is one more child, separated by the same spacing.
+    return total + listViewColumn.spacing * count
+  }
+  readonly property real maxListHeight: Math.max(Style.space(60),
+    panel.cappedContentHeight(Number.MAX_SAFE_INTEGER) - panel.verticalContentInset - root.listChrome)
 
   // No payload key is acted on yet; parsing it first keeps a bad one from
   // stopping the panel opening.
@@ -860,6 +875,7 @@ Panel {
 
         // ---------------------------------------------------------- the list
         Column {
+          id: listViewColumn
           width: parent.width
           spacing: Style.space(8)
           visible: !root.showSignIn && !root.showSettings && !root.showAccount && !root.showAddFeed
