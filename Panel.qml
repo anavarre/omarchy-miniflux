@@ -269,7 +269,7 @@ Panel {
 
   // Fills whichever sign-in fields are still empty from what is on file.
   function prefillSignIn() {
-    if (serverField.text === "") serverField.text = root.miniflux.storedServer
+    if (serverField.text === "") serverField.text = root.miniflux.storedServer || "https://reader.miniflux.app/"
     if (userField.text === "") userField.text = root.miniflux.storedUsername
   }
 
@@ -649,7 +649,7 @@ Panel {
             foreground: root.foreground
             font.family: root.fontFamily
             font.pixelSize: root.fs(Style.font.body)
-            placeholderText: "miniflux.example.org"
+            placeholderText: "https://reader.miniflux.app/"
             onAccepted: userField.forceActiveFocus()
             Keys.onEscapePressed: root.cancelSignIn()
           }

@@ -33,7 +33,8 @@ one of the codes listed at the top of the script. Its error output is cut off af
 
 ## Usage
 
-The first click opens a sign-in form: the address of your instance, your Miniflux
+The first click opens a sign-in form: the address of your instance (prefilled with
+`https://reader.miniflux.app/`, the hosted service), your Miniflux
 username and your password. The password is used once, to mint an API key through
 `POST /v1/api-keys`; only that key is stored. Instances older than Miniflux 2.2.9 have
 no such endpoint, so there the password itself is kept instead.
