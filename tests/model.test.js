@@ -212,6 +212,12 @@ test("parseConfig and parseMe read only the fields they need", () => {
   assert.deepEqual(plain(Model.parseMe('{"username":"ann","is_admin":true}')), { username: "ann" })
 })
 
+test("parseEntries keeps at most 100 entries however many the server sends", () => {
+  const body = JSON.stringify({ total: 150000, entries: Array.from({ length: 150000 }, () => ({})) })
+  assert.equal(Model.parseEntries(body).length, 100)
+  assert.deepEqual(plain(Model.parseEntries(JSON.stringify({ entries: "x" }))), [])
+})
+
 test("parseEntries tolerates missing fields", () => {
   const body = JSON.stringify({
     total: 2,

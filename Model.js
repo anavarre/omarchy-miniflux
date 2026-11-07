@@ -68,10 +68,12 @@ function authCommand(script) {
 // The latest entries, newest published first. Unread only by default; the
 // setting that turns that off asks for every status so a quiet list still has
 // something to show.
+var MAX_ENTRIES = 100
+
 function entriesCommand(script, limit, unreadOnly, sortOrder) {
   var n = Number(limit)
   if (!isFinite(n) || n < 1) n = 10
-  n = Math.min(100, Math.round(n))
+  n = Math.min(MAX_ENTRIES, Math.round(n))
   return [bash, script, "entries", String(n), unreadOnly ? "unread" : "all", knownSortOrder(sortOrder)]
 }
 
@@ -394,12 +396,15 @@ function parseMe(body) {
 
 // Only the fields the list shows are pulled out, so a feed without an author
 // or a published date just reads a little shorter. iconId is 0 for a feed
-// Miniflux has no icon for.
+// Miniflux has no icon for. At most MAX_ENTRIES are kept whatever the server
+// sends, since each one becomes a row in the shell.
 function parseEntries(body) {
   var data = JSON.parse(body)
   var raw = data && data.entries ? data.entries : []
   var out = []
-  for (var i = 0; i < raw.length; i++) {
+  if (!Array.isArray(raw)) raw = []
+  var count = Math.min(raw.length, MAX_ENTRIES)
+  for (var i = 0; i < count; i++) {
     var e = raw[i] || {}
     out.push({
       id: Number(e.id),
